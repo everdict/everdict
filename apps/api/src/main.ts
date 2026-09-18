@@ -1351,18 +1351,6 @@ async function main(): Promise<void> {
     events: platformEventService,
     github: { pushStatus: async (record, actor) => githubSyncRef.current?.pushStatus(record, actor) },
   });
-  // The `change` grade of campaign (docs/architecture/change-campaign-spec.md): every code change belongs to
-  // one, judged by the agent that made it against criteria declared before the work. Postgres when there is
-  // one, memory otherwise — the same contract either way.
-  //
-  // Constructed HERE rather than beside its store, because it needs the tracker: a campaign is filed under the
-  // issue's ID, and every door lets an agent name that issue `EVD-12` instead. Resolving is what makes the
-  // campaign findable under the request it serves.
-  const changeCampaignService = new ChangeCampaignService({
-    store: changeCampaignStore,
-    issues: issueService,
-  });
-
   // Connect the registries' origin backlink now that the tracker exists (construction-order forwarder, like
   // lateEvents): from here on, registering a capability stamped `from: {type:"issue"}` also links it there.
   lateIssueLinks.bind(issueService);
@@ -1995,6 +1983,25 @@ async function main(): Promise<void> {
         }
       : {}),
   });
+  // The `change` grade of campaign (docs/architecture/change-campaign-spec.md): every code change belongs to
+  // one, judged by the agent that made it against criteria declared before the work. Postgres when there is
+  // one, memory otherwise — the same contract either way.
+  //
+  // Constructed HERE rather than beside its store, because it needs the tracker: a campaign is filed under the
+  // issue's ID, and every door lets an agent name that issue `EVD-12` instead. Resolving is what makes the
+  // campaign findable under the request it serves.
+  //
+  // …and AFTER the sandbox sessions, because of the second dependency: a round performed by a delegated work
+  // agent reads that delegate's brief and report from the session that produced it (DEFAUL-38). Deliberately
+  // NOT a late-binding forwarder like `lateEvents`: an unbound forwarder is indistinguishable from a wired one
+  // at `open`, so a deployment with no sandbox driver would accept a campaign whose every round it must then
+  // refuse. Absent here means absent, and `open` says so on the spot.
+  const changeCampaignService = new ChangeCampaignService({
+    store: changeCampaignStore,
+    issues: issueService,
+    ...(sandboxSessions ? { delegations: sandboxSessions } : {}),
+  });
+
   if (sandboxSessions) {
     // Per-replica by nature (like the browser twin): this reaps the compute THIS process holds open.
     setInterval(() => sandboxSessions.sweep(), 30_000).unref();

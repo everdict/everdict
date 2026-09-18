@@ -169,6 +169,60 @@ export const ChangeJudgementSchema = z.object({
 });
 export type ChangeJudgement = z.infer<typeof ChangeJudgementSchema>;
 
+// ── WHAT THE WORKER SAID, BESIDE WHAT THE SUPERVISOR DECIDED (DEFAUL-38) ─────────────────────────────
+//
+// A round performed by a delegated work agent has TWO verdicts in it, and collapsing them is the defect.
+// `DelegateReportSchema` already reuses this file's vocabulary by explicit decision — "a report is a PROPOSED
+// change round" — and the half that was missing is the join: nothing took a report, ran it past the brief it
+// was given, and landed it as a round naming the delegation that produced it. So the supervisor read
+// REPORT.json with their eyes and retyped the judgement, and the round could not say which worker produced it.
+//
+// ⚠️ THE REPORT IS NOT THE JUDGEMENT. `judgement.answers` stays the SUPERVISOR's, answered by the actor logging
+// the round; what the delegate said lives here, alongside it. A delegate whose report became the round's
+// judgement would be grading its own exam — and the difference is only visible if the two are different fields.
+//
+// ⚠️ `unanswered` IS A VALUE. "A report that skipped two of five criteria reads exactly like one that met
+// three" (plugin/commands/delegate.md §8), and it reads that way because a skipped criterion is an ABSENCE —
+// nothing to see unless you count. Here every declared criterion gets an arm, so the skip is a row.
+export const DelegateCriterionEchoSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("answered"),
+    criterionId: z.string().min(1),
+    answer: CriterionAnswerSchema,
+    how: CriterionEvidenceKindSchema,
+    reason: UnmetReasonSchema.optional(),
+    detail: z.string().max(2000).optional(),
+  }),
+  // The delegate did not answer this criterion at all. Not `not_run` — that is a delegate saying "I could not
+  // run it"; this is a delegate that never said anything, which is a different thing to act on.
+  z.object({ kind: z.literal("unanswered"), criterionId: z.string().min(1) }),
+]);
+export type DelegateCriterionEcho = z.infer<typeof DelegateCriterionEchoSchema>;
+
+export const ChangeRoundDelegationSchema = z.object({
+  // The sandbox session that produced this round's work — the `delegationRunId` the evolution grade already
+  // carries on its own rounds. Recorded so "which worker, on which runtime, at what cost" is a lookup.
+  runId: z.string().min(1).max(200),
+  // The delegate's own summary, verbatim. A round that names a delegation and quotes nothing from it asks
+  // every later reader to open a container that no longer exists.
+  summary: z.string().min(1).max(8000),
+  // One entry per criterion the CAMPAIGN declared, in declaration order.
+  reported: z.array(DelegateCriterionEchoSchema).max(200),
+  // Criterion ids the delegate answered that the campaign never declared. Usually a delegate answering an
+  // older brief — which matters precisely because the answer LOOKS valid until someone checks the id.
+  unknownCriteria: z.array(z.string().min(1)).max(200).default([]),
+  // The ids the BRIEF asked about, so a reader can see whether the delegate was actually asked about what it
+  // is being judged on. Read from the brief as it was AUTHORED, never re-parsed out of the rendered BRIEF.md.
+  briefedOn: z.array(z.string().min(1)).max(200).default([]),
+  // What it could not get past, in its own words — separate from a `not_met` reason because a blocker can stop
+  // a delegate before it has an opinion about any criterion at all.
+  blockers: z.array(z.string().max(1000)).max(20).default([]),
+  // The ids of the questions it stopped on (`awaiting`). The TEXT stays on the session; what the round owes is
+  // the fact that the work ended asking rather than finishing.
+  questions: z.array(z.string().min(1).max(100)).max(20).default([]),
+});
+export type ChangeRoundDelegation = z.infer<typeof ChangeRoundDelegationSchema>;
+
 // One attempt: what it believed, what it changed, and how it was judged. Rounds are append-only — a rejected
 // attempt is a round, not a deletion, because what failed is what the next attempt is built on (WikiSkill's
 // contribution: the knowledge survives the rollback).
@@ -183,6 +237,9 @@ export const ChangeRoundSchema = z.object({
   judgement: ChangeJudgementSchema,
   outcome: z.enum(["adopted", "rejected"]),
   learned: z.string().max(4000).optional(),
+  // WHO DID THE WORK, when it was not the agent that judged it. Absent = the judging agent did the work
+  // itself, which is the ordinary case and reads as such.
+  delegation: ChangeRoundDelegationSchema.optional(),
 });
 export type ChangeRound = z.infer<typeof ChangeRoundSchema>;
 
@@ -231,6 +288,14 @@ export const ChangeCampaignRecordSchema = z.object({
   // the whole walk rather than only inside one campaign.
   continues: z.string().min(1).optional(),
   criteria: z.array(ChangeCriterionSchema).min(1).max(100),
+  // ── WHO WORKS THIS CAMPAIGN, DECLARED AT OPEN (DEFAUL-38) ──────────────────────────────────────────
+  //
+  // `{ required: true }` means every round of this campaign is performed by a delegated work agent, and a
+  // round that names no delegation is REFUSED. `z.literal(true)` rather than a boolean on purpose: a `false`
+  // and an absent field would be the same value wearing two spellings, and the thing that must not exist is a
+  // per-round choice — "the delegate did this" decided after the fact is the annotation form of a protocol.
+  // The evaluated grade says the same thing through its frame's delegation budget.
+  delegation: z.object({ required: z.literal(true) }).optional(),
   rounds: z.array(ChangeRoundSchema).default([]),
   state: ChangeCampaignStateSchema,
   close: ChangeCampaignCloseSchema.optional(),

@@ -17,12 +17,14 @@ import {
   type NetworkPolicy,
   NotFoundError,
   RateLimitError,
+  type ReadResult,
   type RegistryAuth,
   type RunRecord,
   type RunStatus,
   type TraceEvent,
   UpstreamError,
   gitAuthEnv,
+  readOrUnknown,
   shq,
 } from "@everdict/contracts";
 import {
@@ -42,6 +44,7 @@ import {
 import { admitCausedWork } from "../admission/admission.js";
 import type { CampaignService } from "../evolution/campaign-service.js";
 import { stampFacts } from "../platform-event/outbox.js";
+import type { DelegationWork } from "../ports/delegation-report-reader.js";
 import type { EnvelopeStore } from "../ports/envelope-store.js";
 import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 import type { LiveSessionRow, RunStore } from "../ports/run-store.js";
@@ -333,7 +336,12 @@ interface PlaygroundState {
   // Present when this session was booted from a DELEGATION PROFILE: who was delegated to (for the read model)
   // and the working directory its context was seeded into — the same cwd every turn must run in, or the
   // delegate loses both its instructions and its conversation.
-  delegation?: { ref: { source: string; id: string; version: string }; workDir: string };
+  //
+  // `brief` is the STRUCTURED handoff, held beside the rendered `BRIEF.md` the delegate reads. A reviewer
+  // asking "which criteria was this delegate actually given" must not re-parse ids out of rendered markdown
+  // (protocol L3 — provenance is born at the source, never re-derived from rendered output): the `doneWhen`
+  // ids were minted by the door that authored the brief, and that is the copy the change grade joins on.
+  delegation?: { ref: { source: string; id: string; version: string }; workDir: string; brief?: DelegationBrief };
 }
 
 // A front-door conversation session's live half (the service-harness sibling of PlaygroundState): the bound
@@ -999,7 +1007,13 @@ export class SandboxSessionService {
                 state: { status: "pending_init" },
                 ...(conversation ? { conversation: { threadSeq: 1 } } : {}),
                 ...(delegation !== undefined
-                  ? { delegation: { ref: delegation.ref, workDir: delegation.workDir } }
+                  ? {
+                      delegation: {
+                        ref: delegation.ref,
+                        workDir: delegation.workDir,
+                        ...(input.brief !== undefined ? { brief: input.brief } : {}),
+                      },
+                    }
                   : {}),
               },
             }
@@ -1156,6 +1170,56 @@ export class SandboxSessionService {
 
   // Exec into the live session. Attach is not a read: creator-or-admin, checked BEFORE anything runs.
   // Every exec lands on the session's trajectory (the evidence a judge or a teammate later reads).
+  // ── WHAT A DELEGATION PRODUCED, FOR THE LANE THAT RECORDS IT (DEFAUL-38) ──────────────────────────
+  //
+  // `DelegationReportReader`. The `change` grade lands a round from a delegate's report, and it must read that
+  // report HERE rather than take it from the supervisor — a retyped report is a description of the work, and
+  // the round is supposed to be a record of it.
+  //
+  // ⚠️ IT ANSWERS THREE WAYS, and the third one is the reason this is not a `| undefined`. A delegate's report
+  // lives on the live session (the container is still up until the supervisor lets it go), so a control plane
+  // that RESTARTED holds the ledger row and no longer holds the report — which is `orphaned`, the state this
+  // lane already has a name for. "The work is unreachable from here" and "there was no report" would then be
+  // the same answer, and the second one silently lets a round be logged that claims work nobody can check.
+  async read(tenant: string, runId: string): Promise<ReadResult<DelegationWork>> {
+    this.sweep();
+    const live = this.sessions.get(runId);
+    if (live === undefined || live.tenant !== tenant) {
+      // Is it a session this workspace ever had? A row we hold but no longer drive is `unknown` (the restart
+      // case); a run nobody here has is genuinely `absent`. ⚠️ And a LEDGER we could not read is neither: a
+      // `.catch(() => undefined)` here would answer `absent` — "no such delegation" — for a database blip,
+      // and the caller's refusal would name the wrong thing (protocol L2).
+      const row = await readOrUnknown(() => this.deps.store.get(runId), `reading delegation session '${runId}'`);
+      if (row.kind === "unknown") return row;
+      const record = row.kind === "read" ? row.value : undefined;
+      if (record === undefined || record.tenant !== tenant) return { kind: "absent" };
+      return {
+        kind: "unknown",
+        reason: `delegation session '${runId}' is no longer live on this control plane, so its report cannot be read from here`,
+      };
+    }
+    const playground = live.playground;
+    const delegation = playground?.delegation;
+    if (playground === undefined || delegation === undefined) return { kind: "absent" };
+    const brief = delegation.brief;
+    if (brief === undefined)
+      return {
+        kind: "unknown",
+        reason: `delegation session '${runId}' was booted without a structured brief, so there is nothing to join its report against`,
+      };
+    const state = playground.state;
+    // The report travels with the two settled states that HAVE one. Everything else has no report to read —
+    // which is a real absence of a report, not a failure to read it.
+    // The report travels with the two settled states that HAVE one. A delegate that finished without filing
+    // one is reported AS THAT — never as an empty report, which would read exactly like a delegate that
+    // answered nothing.
+    const report = state.status === "completed" || state.status === "awaiting" ? state.report : undefined;
+    return {
+      kind: "read",
+      value: { runId, brief, status: state.status, ...(report !== undefined ? { report } : {}) },
+    };
+  }
+
   async exec(
     actor: SandboxActor,
     runId: string,

@@ -146,6 +146,32 @@ no credential here; a delegate that could close its own issue or settle its own 
 its own exam. So the recording is YOURS: take its `learned` into a `create_knowledge_entry` naming the issue
 and the repository, and decide yourself what its answers mean for the issue's status.
 
+**Land its work as a round — do not retype it.**
+
+```
+log_change_round {
+  id: "<the change campaign>",
+  delegation_run_id: "<the sandbox session id>",
+  hypothesis: "<what you believed>",
+  answers: [ … YOUR answer to every criterion the campaign declared … ]
+}
+```
+
+Everdict reads that session's brief and report itself, so the commits and the delegate's gate runs come from
+the report rather than from your keyboard, and the round records what the delegate said about **every**
+declared criterion — a skipped one becomes `{kind:"unanswered"}` instead of a gap you have to count. Add your
+own verification gate in `gateRuns` under its own id; reusing the delegate's is refused.
+
+`answers` stays yours. The round carries both verdicts side by side, and it comes back `rejected` whenever
+yours says so — a report claiming everything met cannot adopt itself.
+
+⚠️ Do this **while the session is still live**. The report lives on the session until you `close_sandbox`, so
+a round logged after the container is gone (or after a redeploy) is refused: Everdict will not record a
+delegation it cannot read.
+
+Open the campaign with `delegation: { required: true }` when every round of it is worked this way — a round
+that then names no session is refused, rather than quietly filed as one you typed yourself.
+
 Close the session when you are done reviewing and the patch is saved (`close_sandbox`) — a completed delegate stays alive and
 addressable until you do, which is what lets you say "that is nearly right, now do this" without a new
 container and a fresh clone.

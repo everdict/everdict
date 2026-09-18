@@ -3789,6 +3789,30 @@ const MUTATIONS = [
     build: "@everdict/agent",
     suite: ["--root", "apps/agent", "src/agent-mailbox.test.ts"],
   },
+  {
+    // ── A DELEGATED ROUND NAMES ITS WORKER (DEFAUL-38) ──────────────────────────────────────────────
+    //
+    // `change-campaign-service.ts` had zero delegation references: the supervisor read REPORT.json with their
+    // eyes and retyped the judgement, and the round could not say which worker produced it. Dropping the
+    // delegation off the round restores exactly that state.
+    name: "DEFAUL-38 — the round does not name the delegation that produced it",
+    file: "packages/application-control/src/evolution/change-campaign-service.ts",
+    from: "      ...(delegated !== undefined ? { delegation: delegated.round } : {}),",
+    to: "",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/evolution/delegated-change-round.test.ts"],
+  },
+  {
+    // …and the half that matters more: the report must never become the judgement. A delegate that could
+    // adopt its own round would be grading its own exam, and the two stay distinguishable only because they
+    // are different fields — so the mutation makes the outcome follow the delegate's own answers.
+    name: "DEFAUL-38 — the delegate's report becomes the verdict",
+    file: "packages/application-control/src/evolution/change-campaign-service.ts",
+    from: "      outcome: deriveRoundOutcome(input.answers),",
+    to: "      outcome: deriveRoundOutcome(delegated !== undefined ? delegated.round.reported.flatMap((e) => (e.kind === \"answered\" ? [{ criterionId: e.criterionId, answer: e.answer, how: e.how, gateRunIds: [] }] : [])) : input.answers),",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/evolution/delegated-change-round.test.ts"],
+  },
 ];
 
 // ── ONE RUNG AT A TIME, FOR RE-AIMING (arch-review 65) ──────────────────────────────────────────────

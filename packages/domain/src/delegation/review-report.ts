@@ -1,4 +1,4 @@
-import type { DelegateReport, DelegationBrief } from "@everdict/contracts";
+import type { ChangeCriterion, DelegateCriterionEcho, DelegateReport, DelegationBrief } from "@everdict/contracts";
 
 // ── DOES THIS REPORT ANSWER THE BRIEF IT WAS GIVEN? ──────────────────────────────────────────────────
 //
@@ -96,5 +96,61 @@ export function tallyDelegateReport(
     notMet: counted.filter((a) => a.answer === "not_met").length,
     notRun: counted.filter((a) => a.answer === "not_run").length,
     unanswered: reviewDelegateReport(brief, report).unanswered.length,
+  };
+}
+
+// ── THE JOIN THE CHANGE GRADE LANDS A ROUND ON (DEFAUL-38) ───────────────────────────────────────────
+//
+// `reviewDelegateReport` answers "does this report answer the brief it was given". This answers the next
+// question, which is the one a round is made of: what did the delegate say about each criterion THE CAMPAIGN
+// DECLARED? The two are different id spaces on purpose — a delegate briefed on an older list, or on a subset,
+// is the case that has to stay visible — and the join is by criterion id because that is the only key both
+// sides mint at their own source.
+//
+// ⚠️ EVERY DECLARED CRITERION GETS AN ENTRY. A skipped one is `unanswered`, in declaration order, so "it
+// skipped two of five" is a pair of rows rather than two rows that are not there. That absence is the exact
+// thing plugin/commands/delegate.md §8 says reads identically to success.
+export interface DelegateRoundJoin {
+  reported: DelegateCriterionEcho[];
+  // Answers naming a criterion this campaign never declared — counted nowhere, dropped nowhere.
+  unknownCriteria: string[];
+  // Declared ids the report answered more than once. Two verdicts for one criterion is not a stronger claim,
+  // it is no claim: there is no rule for choosing between them, so the caller refuses rather than picks.
+  duplicated: string[];
+}
+
+export function joinDelegateReportToCriteria(
+  criteria: Pick<ChangeCriterion, "id">[],
+  report: Pick<DelegateReport, "answers">,
+): DelegateRoundJoin {
+  const declared = new Set(criteria.map((c) => c.id));
+  const byCriterion = new Map<string, DelegateReport["answers"]>();
+  for (const answer of report.answers) {
+    const seen = byCriterion.get(answer.criterionId);
+    if (seen) seen.push(answer);
+    else byCriterion.set(answer.criterionId, [answer]);
+  }
+
+  const reported: DelegateCriterionEcho[] = criteria.map((criterion) => {
+    const answers = byCriterion.get(criterion.id);
+    const answer = answers?.[0];
+    if (answer === undefined) return { kind: "unanswered", criterionId: criterion.id };
+    return {
+      kind: "answered",
+      criterionId: criterion.id,
+      answer: answer.answer,
+      how: answer.how,
+      ...(answer.answer !== "met" ? { reason: answer.reason } : {}),
+      ...(answer.detail !== undefined ? { detail: answer.detail } : {}),
+    };
+  });
+
+  return {
+    reported,
+    unknownCriteria: [...byCriterion.keys()].filter((id) => !declared.has(id)).sort(),
+    duplicated: [...byCriterion.entries()]
+      .filter(([id, answers]) => declared.has(id) && answers.length > 1)
+      .map(([id]) => id)
+      .sort(),
   };
 }

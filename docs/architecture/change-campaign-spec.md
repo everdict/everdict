@@ -3,7 +3,7 @@ kind: spec
 title: "Every code change is a campaign — one lineage from the request to what shipped and what it taught, enforced by the plugin"
 status: accepted
 updated: 2026-09-18
-anchors: [packages/contracts/src/records/evolution-campaign.ts, packages/contracts/src/records/change-campaign.ts, packages/domain/src/evolution/change-campaign.ts, packages/contracts/src/knowledge/node-type.ts, packages/contracts/src/records/tracker.ts, plugin/.claude-plugin/plugin.json, plugin/hooks/hooks.json]
+anchors: [packages/contracts/src/records/evolution-campaign.ts, packages/contracts/src/records/change-campaign.ts, packages/application-control/src/evolution/change-campaign-service.ts, packages/application-control/src/ports/delegation-report-reader.ts, packages/domain/src/evolution/change-campaign.ts, packages/contracts/src/knowledge/node-type.ts, packages/contracts/src/records/tracker.ts, plugin/.claude-plugin/plugin.json, plugin/hooks/hooks.json]
 ---
 # Every code change is a campaign — one lineage from the request to what shipped and what it taught
 
@@ -200,11 +200,30 @@ frozen frame). Confusing the two turns every ordinary bug fix into an evaluation
 
 ### What crosses the seam, and in what shape
 
-This is where verification is not yet tight. `delegate_work` instructs the driver to "verify the result
-yourself, then land it … and report with evidence" — so today verification arrives as **prose in a report**,
-and `sandbox_exec` leaves a trace nobody parses. `GatePolicy` / the release gate decision is a verdict over a
-baseline↔candidate **scorecard** comparison; there is no record for "this repository's own gates ran and this
-is what they said".
+Verification used to arrive as **prose in a report**: `delegate_work` told the driver to "verify the result
+yourself, then land it … and report with evidence", and `sandbox_exec` left a trace nobody parsed.
+
+**That seam is now a call** (DEFAUL-38). `log_change_round { delegation_run_id }` takes the delegate's
+`REPORT.json` from the session that produced it — never from the supervisor's keyboard — and lands it as a
+round:
+
+- a campaign opened with `delegation: { required: true }` **refuses** a round that names no delegation session,
+  so "who did the work" is declared before the work rather than annotated after it;
+- `reviewDelegateReport` runs first, refusing a report whose `observed` answers cite gate runs it does not
+  carry — an observation that names no measurement is an assertion wearing the other word;
+- the report's **change set and gate runs are the round's**, verbatim; a supervisor may add their own
+  verification run under its own id, and reusing the delegate's id is refused (one number, two authors);
+- the round records what the delegate answered for **every criterion the campaign declared**, in declaration
+  order, with a skipped one as `{kind:"unanswered"}` — *"a report that skipped two of five criteria reads
+  exactly like one that met three"* (`plugin/commands/delegate.md` §8) only while the skip is an ABSENCE;
+- and `judgement.answers` stays the **supervisor's**, always. There is deliberately no branch that reads
+  `report.answers` into the judgement: a delegate whose report became the verdict would be grading its own
+  exam, and the two stay distinguishable only because they are different fields. The delegate still holds no
+  credential here.
+
+A delegation the control plane cannot read (its session died with a restart) is `unknown`, and the round is
+refused rather than logged without one — a round that names a delegation nobody can reach claims work whose
+evidence is unreachable.
 
 A `change` campaign's round therefore needs a **verdict the agent writes** — and that record already exists.
 It is the ownership protocol's, and inventing a second one would have been this repository's own recurring

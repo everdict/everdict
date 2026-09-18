@@ -6,6 +6,7 @@ import {
   type ChangeCriterion,
   type ChangeJudgementAnswer,
   type ChangeRound,
+  type ChangeRoundDelegation,
   type ChangeSetEntry,
   ConflictError,
   type GateRun,
@@ -18,9 +19,12 @@ import {
   assertDeclaresARequirement,
   assertObservationsMeasured,
   deriveRoundOutcome,
+  joinDelegateReportToCriteria,
+  reviewDelegateReport,
   summariseRequirements,
 } from "@everdict/domain";
 import type { ChangeCampaignStore } from "../ports/change-campaign-store.js";
+import type { DelegationReportReader, DelegationWork } from "../ports/delegation-report-reader.js";
 import type { IssueRefResolver } from "../ports/issue-ref-resolver.js";
 
 export interface ChangeCampaignServiceDeps {
@@ -28,6 +32,11 @@ export interface ChangeCampaignServiceDeps {
   // REQUIRED, not optional: what makes a campaign findable under its request is that the two sides hold the
   // same key, and an optional resolver would let a deployment file campaigns nobody can join.
   issues: IssueRefResolver;
+  // How a round reaches the delegation that produced it (DEFAUL-38). OPTIONAL, and the optionality is the
+  // deployment's answer rather than a shrug: a control plane with no sandbox driver cannot delegate at all,
+  // and there `delegation: {required: true}` must be refused AT OPEN rather than accepted and then never
+  // satisfiable. An absent reader therefore makes the delegated lane unopenable, not silently permissive.
+  delegations?: DelegationReportReader;
   newId?: () => string;
   now?: () => string;
 }
@@ -39,6 +48,9 @@ export interface OpenChangeCampaignInput {
   // The campaign this one continues — the remainder of a `partially_adopted` predecessor, or a second attempt
   // after an abandonment.
   continues?: string;
+  // Every round of this campaign is performed by a delegated work agent, and one that names no delegation is
+  // refused. Declared here because "who did the work" decided per round, after the fact, is an annotation.
+  delegation?: { required: true };
 }
 
 export interface LogChangeRoundInput {
@@ -48,6 +60,10 @@ export interface LogChangeRoundInput {
   answers: ChangeJudgementAnswer[];
   checkpointId?: string;
   learned?: string;
+  // The sandbox session whose delegate performed this round's work. The service READS that session's report
+  // and brief — it never takes them from the caller, because a supervisor who retypes a report has produced a
+  // description of the work rather than a record of it (protocol L3).
+  delegationRunId?: string;
 }
 
 // How far the chain walk follows `continues`. Bounded because the data could be cyclic and a lineage read
@@ -112,6 +128,16 @@ export class ChangeCampaignService {
     );
     // A campaign made only of quality gates passes without anyone saying what was asked for.
     assertDeclaresARequirement(criteria);
+    // A DECLARATION THAT CANNOT BE SATISFIED IS REFUSED WHERE IT IS MADE. Without a delegation reader this
+    // deployment cannot read a delegate's report, so every round of such a campaign would be refused — and
+    // the author would find that out one round at a time. Refusing at open is the same rule the criteria
+    // follow: the gate is settled before the work, not discovered by it.
+    if (input.delegation !== undefined && this.deps.delegations === undefined)
+      throw new BadRequestError(
+        "NOT_CONFIGURED",
+        {},
+        "this deployment cannot read delegate reports, so a campaign whose rounds must be performed by a delegated work agent cannot be opened here — open it without `delegation` and log the rounds yourself.",
+      );
 
     const at = this.now();
     const record: ChangeCampaignRecord = {
@@ -121,6 +147,7 @@ export class ChangeCampaignService {
       service: { repository: input.service.repository, ...(input.service.path ? { path: input.service.path } : {}) },
       ...(input.continues !== undefined ? { continues: input.continues } : {}),
       criteria,
+      ...(input.delegation !== undefined ? { delegation: input.delegation } : {}),
       rounds: [],
       state: "open",
       createdBy: actor,
@@ -144,17 +171,31 @@ export class ChangeCampaignService {
         { state: campaign.state },
         `campaign is ${campaign.state} — a round appended after the ending would describe work the close never saw.`,
       );
-    const gateRuns = input.gateRuns ?? [];
+    // ── THE DELEGATION EDGE (DEFAUL-38) ───────────────────────────────────────────────────────────
+    //
+    // Everything below was already here — `reviewDelegateReport` in the domain, `DelegateReport` speaking this
+    // file's own vocabulary by explicit decision, `logRound` guarding hard — and nothing called the third with
+    // the first. So a supervisor read REPORT.json with their eyes, retyped the judgement, and the round could
+    // not say which worker produced it. This is that call.
+    const delegated = await this.delegationOf(tenant, campaign, input);
+    // The delegate's own measurements come FIRST and verbatim; anything the caller carries is their own
+    // verification run beside them, never a replacement for one (protocol L3 — provenance at the source).
+    const gateRuns = [...(delegated?.gateRuns ?? []), ...(input.gateRuns ?? [])];
+    const changes = delegated !== undefined ? delegated.changes : input.changes;
+    // ⚠️ THE ANSWERS ARE THE CALLER'S, ALWAYS. There is deliberately no branch here that reads
+    // `report.answers` into the judgement: a delegate whose report became the verdict would be grading its own
+    // exam, and the only reason the two stay distinguishable is that they are different fields. What the
+    // delegate said is recorded on `round.delegation.reported`, joined to these by criterion id.
     assertAnswersCoverCriteria(campaign.criteria, input.answers);
     assertObservationsMeasured(input.answers, gateRuns);
     // The CHAIN's rounds, not this campaign's: a successor could otherwise re-claim its predecessor's commits
     // and the request's lineage would show the same sha under two attempts.
-    assertCommitsUnclaimed(await this.chainRounds(tenant, campaign), input.changes);
+    assertCommitsUnclaimed(await this.chainRounds(tenant, campaign), changes);
 
     const round: ChangeRound = {
       seq: campaign.rounds.length + 1,
       hypothesis: input.hypothesis,
-      changes: input.changes,
+      changes,
       gateRuns,
       judgement: {
         at: this.now(),
@@ -166,6 +207,7 @@ export class ChangeCampaignService {
       // arithmetic nobody can fudge. `not_run` is not `met`, so an unreachable gate cannot be adopted through.
       outcome: deriveRoundOutcome(input.answers),
       ...(input.learned !== undefined ? { learned: input.learned } : {}),
+      ...(delegated !== undefined ? { delegation: delegated.round } : {}),
     };
 
     // The boolean IS the answer to "did this land": a concurrent logger loses here, and a service that
@@ -207,6 +249,127 @@ export class ChangeCampaignService {
     return (await this.deps.store.list(tenant, options)).map(withRequirements);
   }
 
+  // ── WHAT THE DELEGATION PRODUCED, READ FROM THE DELEGATION ────────────────────────────────────────
+  //
+  // Returns what the round should carry, or `undefined` when this round was worked by the agent logging it.
+  // Every refusal here is a refusal to record a claim nobody can check.
+  private async delegationOf(
+    tenant: string,
+    campaign: ChangeCampaignRecord,
+    input: LogChangeRoundInput,
+  ): Promise<{ round: ChangeRoundDelegation; changes: ChangeSetEntry[]; gateRuns: GateRun[] } | undefined> {
+    if (input.delegationRunId === undefined) {
+      if (campaign.delegation === undefined) return undefined;
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { campaignId: campaign.id },
+        "this campaign's rounds are performed by a delegated work agent, so the round must name the sandbox session that produced its work (delegationRunId) — a hand-typed round under this campaign would say nobody did it.",
+      );
+    }
+    const reader = this.deps.delegations;
+    if (reader === undefined)
+      throw new BadRequestError(
+        "NOT_CONFIGURED",
+        { delegationRunId: input.delegationRunId },
+        "this deployment cannot read delegate reports, so a round cannot name one.",
+      );
+
+    const read = await reader.read(tenant, input.delegationRunId);
+    let work: DelegationWork;
+    switch (read.kind) {
+      case "read":
+        work = read.value;
+        break;
+      case "absent":
+        throw new NotFoundError(
+          "NOT_FOUND",
+          { delegationRunId: input.delegationRunId },
+          `delegation session '${input.delegationRunId}' is not a delegation this workspace holds.`,
+        );
+      // ⚠️ NOT "no report, so log it without one" (protocol L2). A delegation nobody could read is not a
+      // delegation that produced nothing, and the round would then claim work whose evidence is unreachable.
+      case "unknown":
+        throw new ConflictError(
+          "CONFLICT",
+          { delegationRunId: input.delegationRunId, reason: read.reason },
+          `delegation session '${input.delegationRunId}' could not be read, so this round cannot say what the worker did — retry once it is reachable rather than logging a round that names it blindly.`,
+        );
+      default:
+        // The union is closed; an arm added later must be answered HERE rather than falling through to a
+        // round that names a delegation nobody classified.
+        return assertNever(read);
+    }
+
+    // `completed` and `awaiting` are both endings a supervisor can judge — the second stopped on a question,
+    // and the round records that it did. Anything else is an outcome nobody has observed yet.
+    if (work.status !== "completed" && work.status !== "awaiting")
+      throw new ConflictError(
+        "CONFLICT",
+        { delegationRunId: input.delegationRunId, status: work.status },
+        `delegation session '${input.delegationRunId}' is ${work.status} — a round logged now would claim an outcome nobody has observed.`,
+      );
+
+    const report = work.report;
+    if (report === undefined)
+      throw new ConflictError(
+        "CONFLICT",
+        { delegationRunId: input.delegationRunId, status: work.status },
+        `delegation session '${input.delegationRunId}' ended without filing a report, so there is nothing to join to this campaign's criteria — ask it for one, or log the round yourself.`,
+      );
+
+    // Does the report answer the brief it was GIVEN? The domain already owns this question; what was missing
+    // was a caller. A citation that resolves to nothing, or two verdicts for one criterion, is not evidence a
+    // round may be built on — the same law this service already enforces on its own answers.
+    const review = reviewDelegateReport(work.brief, report);
+    if (review.danglingGateRuns.length > 0)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { delegationRunId: input.delegationRunId, danglingGateRuns: review.danglingGateRuns },
+        "the delegate's report has `observed` answers citing gate runs it does not carry — an observation that names no measurement is an assertion wearing the other word, and the round would file it as evidence.",
+      );
+
+    // …and does it answer THIS campaign's declaration? Different id spaces on purpose: a delegate briefed on
+    // an older list is exactly the case that has to stay visible.
+    const join = joinDelegateReportToCriteria(campaign.criteria, report);
+    if (join.duplicated.length > 0)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { delegationRunId: input.delegationRunId, duplicated: join.duplicated },
+        `the delegate answered ${join.duplicated.join(", ")} more than once — two verdicts for one criterion is not a stronger claim, it is no claim.`,
+      );
+
+    // The change set is the delegate's. A supervisor retyping the commits is the re-derivation that makes the
+    // round a description of the work instead of a record of it.
+    if (input.changes.length > 0)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { delegationRunId: input.delegationRunId },
+        "a delegated round takes its change set from the delegate's report — send `changes` only for a round you performed yourself.",
+      );
+    const reportedGateIds = new Set(report.gateRuns.map((g) => g.id));
+    const collision = (input.gateRuns ?? []).find((g) => reportedGateIds.has(g.id));
+    if (collision !== undefined)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { delegationRunId: input.delegationRunId, gateRunId: collision.id },
+        `gate run '${collision.id}' is already the delegate's measurement — your own verification run needs its own id, or the round would show one number under two authors.`,
+      );
+
+    return {
+      round: {
+        runId: input.delegationRunId,
+        summary: report.summary,
+        reported: join.reported,
+        unknownCriteria: join.unknownCriteria,
+        briefedOn: work.brief.doneWhen.map((c) => c.id),
+        blockers: report.blockers,
+        questions: report.questions.map((q) => q.id),
+      },
+      changes: report.changes,
+      gateRuns: report.gateRuns,
+    };
+  }
+
   // Every round this request has already recorded, walking `continues` backwards. Bounded and cycle-safe:
   // corrupt data must not turn a write path into a hang.
   private async chainRounds(tenant: string, campaign: ChangeCampaignRecord): Promise<ChangeRound[]> {
@@ -241,4 +404,10 @@ function withRequirements(record: ChangeCampaignRecord): ChangeCampaignView {
     ...record,
     requirements: summariseRequirements(record.criteria, latest?.judgement.answers ?? []),
   };
+}
+
+// Exhaustiveness for the ReadResult switch above — a new arm becomes a compile error at the one place that
+// decides what an unclassified delegation read means.
+function assertNever(value: never): never {
+  throw new Error(`unreachable: ${JSON.stringify(value)}`);
 }

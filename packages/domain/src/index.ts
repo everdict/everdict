@@ -608,8 +608,10 @@ export { issueDelegationBrief, type IssueDelegationBriefInput } from "./delegati
 export {
   reviewDelegateReport,
   tallyDelegateReport,
+  joinDelegateReportToCriteria,
   type DelegateReportReview,
   type DelegateReportTally,
+  type DelegateRoundJoin,
 } from "./delegation/review-report.js";
 // capability — the first-party default-toolset selection kernel (which built-in tools apply to a workspace)
 export {

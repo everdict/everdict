@@ -30,9 +30,15 @@ export function registerChangeCampaignTools(server: McpServer, ctx: McpToolConte
           .min(1)
           .optional()
           .describe("the ENDED campaign this one continues — the remainder of a partial adoption, or a retry"),
+        delegation: z
+          .object({ required: z.literal(true) })
+          .optional()
+          .describe(
+            "set { required: true } when every round of this campaign is performed by a DELEGATED work agent — a round that names no delegation session is then refused, rather than quietly accepted as a hand-typed one. Declared here and not per round on purpose: who did the work, decided after the work, is an annotation nobody checks.",
+          ),
       },
     },
-    ({ issue_id, repository, path, criteria, continues }) =>
+    ({ issue_id, repository, path, criteria, continues, delegation }) =>
       run(principal, "scorecards:run", async () =>
         ok(
           await svc.open(ws, principal.subject, {
@@ -40,6 +46,7 @@ export function registerChangeCampaignTools(server: McpServer, ctx: McpToolConte
             service: { repository, ...(path !== undefined ? { path } : {}) },
             criteria,
             ...(continues !== undefined ? { continues } : {}),
+            ...(delegation !== undefined ? { delegation } : {}),
           }),
         ),
       ),
@@ -54,14 +61,22 @@ export function registerChangeCampaignTools(server: McpServer, ctx: McpToolConte
       inputSchema: {
         id: z.string().min(1),
         hypothesis: z.string().min(1).max(2000),
-        changes: z.array(ChangeSetEntrySchema).max(50),
+        changes: z.array(ChangeSetEntrySchema).max(50).default([]),
         gateRuns: z.array(GateRunSchema).max(50).default([]),
         answers: z.array(ChangeJudgementAnswerSchema).max(200),
         checkpoint_id: z.string().min(1).optional(),
         learned: z.string().max(4000).optional().describe("what this attempt taught — kept even when it was rejected"),
+        delegation_run_id: z
+          .string()
+          .min(1)
+          .max(200)
+          .optional()
+          .describe(
+            "the sandbox session whose DELEGATE did this round's work. Everdict reads that session's brief and report itself — do not retype them: `changes` and the delegate's gate runs come from the report, and the round records what the delegate answered for EVERY criterion this campaign declared, so a criterion it skipped is a row rather than an absence. `answers` stays YOURS: a delegate whose report became the judgement would be grading its own exam.",
+          ),
       },
     },
-    ({ id, hypothesis, changes, gateRuns, answers, checkpoint_id, learned }) =>
+    ({ id, hypothesis, changes, gateRuns, answers, checkpoint_id, learned, delegation_run_id }) =>
       run(principal, "scorecards:run", async () =>
         ok(
           await svc.logRound(ws, principal.subject, id, {
@@ -71,6 +86,7 @@ export function registerChangeCampaignTools(server: McpServer, ctx: McpToolConte
             answers,
             ...(checkpoint_id !== undefined ? { checkpointId: checkpoint_id } : {}),
             ...(learned !== undefined ? { learned } : {}),
+            ...(delegation_run_id !== undefined ? { delegationRunId: delegation_run_id } : {}),
           }),
         ),
       ),

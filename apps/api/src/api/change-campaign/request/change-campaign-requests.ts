@@ -26,18 +26,29 @@ export const OpenChangeCampaignBodySchema = z.object({
   criteria: z.array(DeclarableCriterionSchema).min(1).max(100),
   // The ENDED campaign this one continues — a request's attempts are a chain, one of them open at a time.
   continues: z.string().min(1).optional(),
+  // Every round of this campaign is performed by a delegated work agent (DEFAUL-38). `{required: true}` is the
+  // only value: a `false` would be a second spelling of "absent", and what must not exist is a per-round
+  // choice — "the delegate did this", decided after the work, is an annotation nobody checks.
+  delegation: z.object({ required: z.literal(true) }).optional(),
 });
 
 // No `outcome`: the round's verdict is DERIVED from the answers. A body that could carry it would let a
 // caller report "adopted" over an answer set that says otherwise.
 export const LogChangeRoundBodySchema = z.object({
   hypothesis: z.string().min(1).max(2000),
-  changes: z.array(ChangeSetEntrySchema).max(50),
+  // Absent on a DELEGATED round: the change set comes from the delegate's report, read from the session that
+  // produced it. A supervisor retyping the commits is the re-derivation that turns a record into a summary.
+  changes: z.array(ChangeSetEntrySchema).max(50).default([]),
   // What the repository's gates answered, with numbers. An `observed` answer must cite one of these.
   gateRuns: z.array(GateRunSchema).max(50).default([]),
+  // ⚠️ THE ANSWERS ARE ALWAYS THE CALLER'S, delegated round or not. A delegate whose report became the
+  // judgement would be grading its own exam; what it said is recorded beside this, joined by criterion id.
   answers: z.array(ChangeJudgementAnswerSchema).max(200),
   checkpointId: z.string().min(1).optional(),
   learned: z.string().max(4000).optional(),
+  // The sandbox session whose delegate did this round's work. The service READS that session's brief and
+  // report; it is a POINTER, never a copy.
+  delegationRunId: z.string().min(1).max(200).optional(),
 });
 
 // `at` and `by` are stamped by the control plane, never supplied — the closer's identity is not the closer's
