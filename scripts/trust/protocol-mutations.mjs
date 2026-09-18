@@ -3814,6 +3814,38 @@ const MUTATIONS = [
     build: "@everdict/application-control",
     suite: ["--root", "packages/application-control", "src/evolution/delegated-change-round.test.ts"],
   },
+  {
+    // ── THE LIST IS A PROJECTION (DEFAUL-36) ────────────────────────────────────────────────────────
+    //
+    // Nine campaigns returned in full came to 85,793 characters and exceeded the caller's output limit.
+    // Mapping the whole view back onto the row is that defect verbatim, and it also takes `rounds.total`
+    // away — the field that makes a row say how much it withheld.
+    name: "DEFAUL-36 — the campaign list carries the rounds again",
+    file: "packages/application-control/src/evolution/change-campaign-service.ts",
+    from: "    return { items: records.map(summarise), available };",
+    to: "    return { items: records.map((r) => withRequirements(r)), available };",
+    build: "@everdict/application-control",
+    suite: [
+      "--root",
+      "packages/application-control",
+      "src/evolution/change-campaign-list-projection.counterexample.test.ts",
+    ],
+  },
+  {
+    // …and the half a byte check cannot see: `available` counted off the PAGE. A full page and a corpus
+    // exactly that size are the same array, so this is a bounded read reporting "there is no more" when it
+    // means "I stopped" (protocol L2) — and the web deleted its own inference on the strength of it.
+    name: "DEFAUL-36 — available counts the page instead of the corpus",
+    file: "packages/application-control/src/evolution/change-campaign-service.ts",
+    from: "    return { items: records.map(summarise), available };",
+    to: "    void available;\n    return { items: records.map(summarise), available: records.length };",
+    build: "@everdict/application-control",
+    suite: [
+      "--root",
+      "packages/application-control",
+      "src/evolution/change-campaign-list-projection.counterexample.test.ts",
+    ],
+  },
 ];
 
 // ── ONE RUNG AT A TIME, FOR RE-AIMING (arch-review 65) ──────────────────────────────────────────────
