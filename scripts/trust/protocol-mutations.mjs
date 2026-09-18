@@ -3803,13 +3803,14 @@ const MUTATIONS = [
     suite: ["--root", "packages/application-control", "src/evolution/delegated-change-round.test.ts"],
   },
   {
-    // …and the half that matters more: the report must never become the judgement. A delegate that could
-    // adopt its own round would be grading its own exam, and the two stay distinguishable only because they
-    // are different fields — so the mutation makes the outcome follow the delegate's own answers.
-    name: "DEFAUL-38 — the delegate's report becomes the verdict",
+    // …and the half that matters more: the SUPERVISOR owns the verdict. A delegate that could adopt its own
+    // round would be grading its own exam, and the verdict stays the supervisor's only because the round
+    // derives it from `input.answers` and from nothing else. Letting a delegated round adopt regardless is
+    // that protocol removed — the disproof (a delegated round that comes back REJECTED) then goes green-side-up.
+    name: "DEFAUL-38 — a delegated round adopts whatever the supervisor answered",
     file: "packages/application-control/src/evolution/change-campaign-service.ts",
     from: "      outcome: deriveRoundOutcome(input.answers),",
-    to: "      outcome: deriveRoundOutcome(delegated !== undefined ? delegated.round.reported.flatMap((e) => (e.kind === \"answered\" ? [{ criterionId: e.criterionId, answer: e.answer, how: e.how, gateRunIds: [] }] : [])) : input.answers),",
+    to: '      outcome: delegated !== undefined ? "adopted" : deriveRoundOutcome(input.answers),',
     build: "@everdict/application-control",
     suite: ["--root", "packages/application-control", "src/evolution/delegated-change-round.test.ts"],
   },
