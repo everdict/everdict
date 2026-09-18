@@ -3823,7 +3823,14 @@ const MUTATIONS = [
     name: "DEFAUL-36 — the campaign list carries the rounds again",
     file: "packages/application-control/src/evolution/change-campaign-service.ts",
     from: "    return { items: records.map(summarise), available };",
-    to: "    return { items: records.map((r) => withRequirements(r)), available };",
+    // The cast is deliberate: without it the mutated tree does not COMPILE (the page's item type is the
+    // summary), and a rung that cannot build proves only that the type refuses — never that the suite would
+    // catch an author who bypassed it. This drives the assertion.
+    // Two things the replacement has to carry or the tree will not BUILD, and a rung that cannot build proves
+    // only that the compiler refuses — never that the suite would catch an author who bypassed it. The cast,
+    // because the page's item type is the summary; and `void summarise`, because `noUnusedLocals` is on and
+    // this was its only call site.
+    to: "    void summarise;\n    return { items: records.map((r) => withRequirements(r) as unknown as ChangeCampaignSummary), available };",
     build: "@everdict/application-control",
     suite: [
       "--root",
