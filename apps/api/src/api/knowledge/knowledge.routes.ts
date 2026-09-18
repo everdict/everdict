@@ -23,11 +23,13 @@ export function registerKnowledgeRoutes(app: FastifyInstance, deps: ServerDeps):
       return reply.code(404).send({ code: "NOT_FOUND", message: "knowledge service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
-    const parsed = RecordRetrievalUseBodySchema.safeParse(req.body);
-    if (!parsed.success)
-      return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(parsed.error).join("; ") });
     try {
+      // AUTHORIZE, THEN PARSE (rule `api-layer`, the fixed handler shape). `gate` reads nothing from the body,
+      // so parsing first only tells a caller who may not use this door which fields their request got wrong.
       gate(principal, "scorecards:read");
+      const parsed = RecordRetrievalUseBodySchema.safeParse(req.body);
+      if (!parsed.success)
+        return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(parsed.error).join("; ") });
       return reply.send(
         await deps.knowledgeService.recordUse(principal.workspace, principal.subject, {
           sessionId: parsed.data.assemblyPath.split("/").at(-2) ?? "unattributed",
