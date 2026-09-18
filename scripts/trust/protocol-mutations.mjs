@@ -3853,6 +3853,19 @@ const MUTATIONS = [
       "src/evolution/change-campaign-list-projection.counterexample.test.ts",
     ],
   },
+  {
+    // ── THE LINEAGE RESOLVES THE NAME A MEMBER TYPES (DEFAUL-53) ────────────────────────────────────
+    //
+    // Every campaign is filed under the issue's ID because the write side resolves the ref. Passing the
+    // caller's spelling through is the defect verbatim: `DEFAUL-37` found nothing and reported it as a
+    // request that caused nothing, with every source saying `read`.
+    name: "DEFAUL-53 — the lineage trusts the spelling it was given",
+    file: "packages/application-control/src/issue/issue-lineage-service.ts",
+    from: "    const issueId = (await this.deps.issues.get(tenant, ref)).id;",
+    to: "    const issueId = ref;",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/issue/issue-lineage-service.test.ts"],
+  },
 ];
 
 // ── ONE RUNG AT A TIME, FOR RE-AIMING (arch-review 65) ──────────────────────────────────────────────
