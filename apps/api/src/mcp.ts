@@ -37,6 +37,7 @@ import { registerMattermostTools } from "./api/mattermost/mattermost.mcp.js";
 import type { McpDeps, McpToolContext } from "./api/mcp-context.js";
 import { registerInviteTools } from "./api/member/invite.mcp.js";
 import { registerMemberTools } from "./api/member/member.mcp.js";
+import { registerMetaTools } from "./api/meta/meta.mcp.js";
 import { registerModelTools } from "./api/model/model.mcp.js";
 import { registerNotificationTools } from "./api/notification/notification.mcp.js";
 import { registerDriverOpsTools } from "./api/ops/driver.mcp.js";
@@ -140,6 +141,9 @@ export function buildMcpServer(
   registerProxyTools(server, ctx);
   registerCommentTools(server, ctx);
   registerKnowledgeTools(server, ctx);
+  // No ctx: what this deployment is built from is the same answer for every caller, and a session deciding
+  // whether to trust a contract must not need a workspace to find out (DEFAUL-54).
+  registerMetaTools(server);
   registerChangeCampaignTools(server, ctx);
   registerApiKeyTools(server, ctx);
   registerMemberTools(server, ctx);

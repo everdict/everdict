@@ -46,6 +46,11 @@ RUN pnpm install --frozen-lockfile \
 
 # ---- runtime: build output + node_modules only ----
 FROM base AS runtime
+# The commit this image was built from (DEFAUL-54). Declared in the runtime stage rather than at the top,
+# because an ARG is scoped to the stage that declares it — and empty is a real value here: an image built
+# without it reports `commit: null` rather than guessing from the tag.
+ARG EVERDICT_BUILD_COMMIT=""
+ENV EVERDICT_BUILD_COMMIT=$EVERDICT_BUILD_COMMIT
 ENV NODE_ENV=production PORT=8787
 # pnpm's virtual store (node_modules/.pnpm) uses relative symlinks inside /app, so a wholesale copy preserves it.
 COPY --from=builder /app /app

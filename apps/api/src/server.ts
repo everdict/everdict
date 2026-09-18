@@ -39,6 +39,7 @@ import { registerKnowledgeRoutes } from "./api/knowledge/knowledge.routes.js";
 import { registerMattermostRoutes } from "./api/mattermost/mattermost.routes.js";
 import { registerInviteRoutes } from "./api/member/invite.routes.js";
 import { registerMemberRoutes } from "./api/member/member.routes.js";
+import { registerMetaRoutes } from "./api/meta/meta.routes.js";
 import { registerModelRoutes } from "./api/model/model.routes.js";
 import { registerNotificationRoutes } from "./api/notification/notification.routes.js";
 import { registerDriverOpsRoutes } from "./api/ops/driver.routes.js";
@@ -132,6 +133,9 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   // sees routes added after the plugin loads (root-level routes would be added too early and vanish from /docs).
   app.register(async (routes) => {
     routes.get("/healthz", async () => ({ ok: true }));
+    // …and what this deployment IS, beside whether it is alive (DEFAUL-54). Liveness and identity are
+    // different questions and a probe read on a loop must not carry both.
+    registerMetaRoutes(routes);
 
     // --- resource route modules (see .claude/rules/api-layer.md — root = layer, inside = domain) ---
     registerFrontdoorCallbackRoutes(routes, deps);

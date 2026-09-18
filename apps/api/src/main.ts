@@ -387,6 +387,16 @@ async function main(): Promise<void> {
   // The workspace filesystem — S3/MinIO when env-configured (distributed: every replica sees one tree), else
   // in-memory (dev). Same object storage as artifacts, namespaced under the "fs/" key prefix. Skill + knowledge
   // bodies live on it as the SSOT (content-projection); the Files page + fs tools browse it.
+  // WHAT THIS PROCESS IS BUILT FROM, in the logs (DEFAUL-54). The redeploy that produced this line had to be
+  // verified by `docker exec … grep` inside the container, because the image TAG is a hand-set string that
+  // names a commit the build has nothing to do with. UNSTAMPED is said out loud rather than omitted: an
+  // absent stamp is a deployment that cannot answer, which a reader must be able to tell from a current one.
+  const buildCommit = process.env.EVERDICT_BUILD_COMMIT?.trim();
+  console.log(
+    buildCommit
+      ? `▶ built from ${buildCommit}`
+      : "▶ built from: UNSTAMPED — this image says nothing about its commit, so a caller cannot tell whether its contracts are current (build with EVERDICT_BUILD_COMMIT)",
+  );
   const rawWorkspaceFs = (await workspaceFsFromEnv()) ?? new InMemoryWorkspaceFs();
   console.log(
     rawWorkspaceFs instanceof InMemoryWorkspaceFs

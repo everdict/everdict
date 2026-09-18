@@ -800,6 +800,10 @@ describe("MCP tools", () => {
       "gate_scorecards",
       "get_agent",
       "get_dataset",
+      // What THIS control plane is built from — the read a session runs before it trusts any schema here
+      // (DEFAUL-54). No ctx and no gate: a caller deciding whether a contract is current must not need a
+      // workspace to find out.
+      "get_deployment",
       "get_environment",
       "get_github_file",
       "get_github_issue",

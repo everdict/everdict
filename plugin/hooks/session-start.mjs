@@ -60,6 +60,12 @@ const repository = originUrl ? (/[:/]([^/:]+\/[^/]+?)(?:\.git)?$/.exec(originUrl
 // asked with — which the session does, because the hook makes no calls of its own.
 const issueHint = branch ? (/\b[A-Z][A-Z0-9]*-\d+\b/.exec(branch)?.[0] ?? undefined) : undefined;
 
+// WHAT THIS CHECKOUT IS AT (DEFAUL-54). Half of the drift question; the other half is what the DEPLOYMENT is
+// built from, and only the deployment knows that. The hook does not — and must not — fetch it: carrying no
+// credential is what lets a machine with no Everdict configured degrade to a sentence rather than a failed
+// request. So the hook states its half and names the one read that answers the other.
+const head = git("rev-parse", "HEAD");
+
 const workspaceFile = root ? path.join(root, ".everdict", "workspace") : undefined;
 const envWorkspace = process.env.EVERDICT_WORKSPACE?.trim();
 const fileWorkspace =
@@ -90,6 +96,20 @@ emit(
     "",
     `- workspace: **${workspace}** (from ${workspaceFrom})`,
     `- repository: **${repository ?? "unknown"}**${branch ? ` · branch \`${branch}\`` : ""}`,
+    "",
+    "## ⚠️ First, check you are not being handed an older contract than your code",
+    "",
+    "```",
+    "get_deployment {}",
+    "```",
+    "",
+    head
+      ? `Your checkout is at \`${head}\`. If \`commit\` is not a commit this checkout CONTAINS, the tools you are`
+      : "If `commit` is not a commit this checkout contains, the tools you are",
+    "about to use are OLDER than your code: a defect you just fixed can still be live, and a tool you expect may",
+    "be absent from the catalogue. **Say the deployment is behind — do not re-open the finding.** Measured",
+    "2026-09-18: four merged, gated, pushed fixes were invisible to a session, and two findings were nearly",
+    "re-opened on that basis. `commit: null` means the image carries no stamp: neither agreement nor staleness.",
     "",
     "## Before you change code — run this, it is already addressed to this service",
     "",

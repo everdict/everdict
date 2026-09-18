@@ -53,6 +53,11 @@ x-build-args: &build-args
   https_proxy: ${https_proxy:-}
   no_proxy: ${no_proxy:-}
   CA_CERT: ${CA_CERT:-}
+  # WHAT THIS IMAGE IS BUILT FROM (DEFAUL-54). Pass it at build time — `EVERDICT_BUILD_COMMIT=$(git rev-parse
+  # HEAD) docker compose build …` — so a deployment can state its own identity. Unset is LEGAL and reports
+  # `commit: null`: "I do not know what I am built from" is the honest answer, and defaulting to the image TAG
+  # would be worse than saying nothing, because the tag is a hand-set string in a gitignored .env.
+  EVERDICT_BUILD_COMMIT: ${EVERDICT_BUILD_COMMIT:-}
 
 # Corporate-network RUNTIME passthrough — build args above cover image builds only; the running processes need the
 # same env to reach the internet (api: installProxyDispatcher covers LLM providers / trace pull·export / GitHub App /

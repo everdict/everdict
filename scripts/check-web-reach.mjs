@@ -42,6 +42,14 @@ const NOT_A_BROWSER_SURFACE = [
 const DECIDED = new Map([
   // ── NOT A BROWSER'S DOOR ──────────────────────────────────────────────────────────────────────────
   ["/workspace/github-app/callback", "GitHub redirects the browser here and the server handles it"],
+  // ── ASKED BEFORE A CALLER TRUSTS A CONTRACT, AND A BROWSER HAS NO CONTRACT TO DISTRUST ───────────
+  //
+  // `GET /deployment` says which commit this control plane was built from (DEFAUL-54). Its whole purpose is
+  // to be compared against a CHECKOUT — a session holds one, a browser does not, and the web is served by the
+  // same deployment it would be asking about, so a page showing the answer would be telling a reader a fact
+  // about itself that they have nothing to compare it to. The drift it exists to catch is between a
+  // repository and a deployment, and only something holding both can see it.
+  ["/deployment", "it is compared against a checkout, which a browser does not have"],
   // The adoption's SPEND. Its body carries the candidate's own document bytes (`{proof, spec}`), and the
   // browser does not hold them: it would have to guess a document from a registry READ, which returns what
   // that door renders rather than what `register` takes. A guess that lands writes an IMMUTABLE version, and
