@@ -119,7 +119,23 @@ Hand over the work and watch:
 - `get_sandbox { id }` — `live.delegate` says what it IS: `running` · `interrupted` · `completed` (with its
   report) · `errored` · `orphaned`.
 
-## 7. Read the report, and record what it taught
+## 7. ⚠️ Get the work OUT before you do anything else
+
+```
+sandbox_exec { id, command: "cd work && git format-patch -1 --stdout" }
+```
+
+Save that patch. Do this **before** you read the report, not after.
+
+Everything the delegate produced lives in a container that dies with its TTL, with a redeploy, or with a
+crash — and `sandbox_git_push` is the only other way out, which writes to somebody's repository and therefore
+waits on a human. While it waits, the work is exposed.
+
+This is written down because it was paid for: on 2026-09-18 a delegate's 275-line commit was lost to a
+redeploy that happened between reading its report and deciding what to do about it. The report survived only
+because it had already been copied out; the code had not been.
+
+## 8. Read the report, and record what it taught
 
 A finished delegate writes `REPORT.json`; it arrives on `get_sandbox` as `live.delegate.report`. Read the
 per-criterion answers, not just the summary — a report that skipped two of five criteria reads exactly like
@@ -130,6 +146,6 @@ no credential here; a delegate that could close its own issue or settle its own 
 its own exam. So the recording is YOURS: take its `learned` into a `create_knowledge_entry` naming the issue
 and the repository, and decide yourself what its answers mean for the issue's status.
 
-Close the session when you are done reviewing (`close_sandbox`) — a completed delegate stays alive and
+Close the session when you are done reviewing and the patch is saved (`close_sandbox`) — a completed delegate stays alive and
 addressable until you do, which is what lets you say "that is nearly right, now do this" without a new
 container and a fresh clone.
