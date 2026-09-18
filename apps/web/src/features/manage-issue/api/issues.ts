@@ -102,6 +102,31 @@ export async function setIssueStatusAction(
   }
 }
 
+// ── THE WORK CHAIN (DEFAUL-39) ───────────────────────────────────────────────────────────────────────
+//
+// A SEPARATE action from the status one, because they are separate axes: the board says where the work is,
+// the chain says whether the request was designed, decided and shipped. One action taking both would make a
+// single refusal answer two questions.
+//
+// The move carries its required value in the same shape the control plane's body takes — a union, so
+// "accept" with no design does not typecheck here either, and the state the chain exists to refuse cannot be
+// expressed on the way in.
+export type IssueChainMove =
+  | { move: 'accept'; design: { kind: 'spec'; path: string } | { kind: 'declined'; why: string } }
+  | { move: 'reject'; reason: string }
+  | { move: 'ship' }
+  | { move: 'redraft' }
+
+export async function setIssueChainAction(id: string, body: IssueChainMove): Promise<IssueActionResult> {
+  const ctx = await authContext()
+  try {
+    const issue = issueSchema.parse(await controlPlane.setIssueChain(ctx, id, body))
+    return { ok: true, issue }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
 export async function deleteIssueAction(id: string): Promise<{ ok: boolean; error?: string }> {
   const ctx = await authContext()
   try {

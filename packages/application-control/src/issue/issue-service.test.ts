@@ -11,7 +11,7 @@ import {
   type ScorecardStore,
   countScorecardGroups,
 } from "../ports/scorecard-store.js";
-import { IssueService } from "./issue-service.js";
+import { IssueService, type IssueServiceDeps } from "./issue-service.js";
 
 // The workspace mints one sequence, so the allocator is a counter and a prefix. Built per test: the counter is
 // state, and a shared one would make each test's identifiers depend on the tests that ran before it.
@@ -135,15 +135,79 @@ describe("IssueService", () => {
   let ids: number;
   const actor = { subject: "dana" };
 
-  function service(deps: { scorecards?: ScorecardStore } = {}) {
+  function service(deps: { scorecards?: ScorecardStore; specs?: IssueServiceDeps["specs"] } = {}) {
     return new IssueService({
       numbers: workspaceAllocator(),
       store,
       ...(deps.scorecards !== undefined ? { scorecards: deps.scorecards } : {}),
+      ...(deps.specs !== undefined ? { specs: deps.specs } : {}),
       newId: () => `id-${++ids}`,
       now: () => NOW,
     });
   }
+
+  // ── DEFAUL-39 §2.4: THE DESIGN A REQUEST WAS ACCEPTED ON HAS TO EXIST ─────────────────────────────
+  //
+  // A `spec` acceptance names a path in this workspace's filesystem, and a pointer nobody can open is the
+  // same silence the declination abolishes, one indirection further out. The aggregate cannot read a
+  // filesystem, so this is the service's half and it is checked BEFORE the transition.
+  describe("accepting on a design", () => {
+    const present = { exists: async (_t: string, path: string) => path === "docs/specs/real-spec.md" };
+
+    it("refuses a spec path that does not resolve, names it, and writes nothing", async () => {
+      const svc = service({ specs: present });
+      const issue = await svc.create({ tenant: "acme", createdBy: actor.subject, title: "the photo does not open" });
+
+      await expect(
+        svc.accept("acme", issue.id, { kind: "spec", path: "docs/specs/imagined.md" }, actor),
+      ).rejects.toThrow(/No file at 'docs\/specs\/imagined.md'/);
+
+      // ⚠️ The world is read back — a refusal after a durable write is not a refusal.
+      expect((await svc.get("acme", issue.id)).chain).toBeUndefined();
+    });
+
+    it("accepts on a spec that resolves", async () => {
+      const svc = service({ specs: present });
+      const issue = await svc.create({ tenant: "acme", createdBy: actor.subject, title: "the photo does not open" });
+
+      const accepted = await svc.accept("acme", issue.id, { kind: "spec", path: "docs/specs/real-spec.md" }, actor);
+      expect(accepted.chain).toEqual({
+        state: "accepted",
+        at: NOW,
+        by: actor.subject,
+        design: { kind: "spec", path: "docs/specs/real-spec.md" },
+      });
+    });
+
+    // A declination names no file, so nothing is looked up — the check belongs to the arm that points at one.
+    it("never consults the filesystem for a declination", async () => {
+      let asked = 0;
+      const svc = service({
+        specs: {
+          exists: async () => {
+            asked += 1;
+            return false;
+          },
+        },
+      });
+      const issue = await svc.create({ tenant: "acme", createdBy: actor.subject, title: "rename a flag" });
+
+      const accepted = await svc.accept("acme", issue.id, { kind: "declined", why: "the diff is the design" }, actor);
+      expect(accepted.chain).toMatchObject({ design: { kind: "declined" } });
+      expect(asked).toBe(0);
+    });
+
+    // The optionality is a deployment fact and is stated rather than hidden: with no filesystem composed, a
+    // spec acceptance is taken on trust. Refusing every one of them there would leave `declined` as the only
+    // reachable arm, which is a worse answer than an unchecked pointer.
+    it("takes a spec acceptance on trust when no filesystem is composed", async () => {
+      const svc = service();
+      const issue = await svc.create({ tenant: "acme", createdBy: actor.subject, title: "the photo does not open" });
+
+      const accepted = await svc.accept("acme", issue.id, { kind: "spec", path: "docs/specs/anything.md" }, actor);
+      expect(accepted.chain).toMatchObject({ design: { kind: "spec", path: "docs/specs/anything.md" } });
+    });
+  });
 
   beforeEach(() => {
     store = new FakeIssueStore();

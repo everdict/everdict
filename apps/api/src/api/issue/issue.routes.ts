@@ -4,7 +4,7 @@ import { IssueLinkTypeSchema } from "@everdict/contracts";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import type { z } from "zod";
 import { agentAttributionFrom } from "../fs/fs-actor.js";
-import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-context.js";
+import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
 import { issueDocs } from "./issue.docs.js";
 import { CreateIssueBodySchema } from "./request/create-issue.js";
 import { IssueLinkInputSchema } from "./request/create-issue.js";
@@ -14,6 +14,7 @@ import {
   type ListIssuesQuery,
   issueFilterOf,
 } from "./request/list-issues.js";
+import { SetIssueChainBodySchema } from "./request/set-issue-chain.js";
 import { SetIssueStatusBodySchema } from "./request/set-issue-status.js";
 import { UpdateIssueBodySchema } from "./request/update-issue.js";
 
@@ -205,6 +206,35 @@ export function registerIssueRoutes(app: FastifyInstance, deps: ServerDeps): voi
           ...(agent ? { agent } : {}),
         }),
       );
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // The WORK CHAIN, moved by its own door (DEFAUL-39). Deliberately not folded into /status: the board and
+  // the chain answer different questions, and one door would make one refusal answer both.
+  app.post<{ Params: { id: string } }>("/issues/:id/chain", { schema: issueDocs.setChain }, async (req, reply) => {
+    if (!deps.issueService) return reply.code(404).send({ code: "NOT_FOUND", message: "issue service not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "issues:write");
+      const parsed = SetIssueChainBodySchema.safeParse(req.body);
+      if (!parsed.success)
+        return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(parsed.error).join("; ") });
+      const body = parsed.data;
+      const agent = agentAttributionFrom(req.headers);
+      const actor = { subject: principal.subject, ...(agent ? { agent } : {}) };
+      const service = deps.issueService;
+      const record =
+        body.move === "accept"
+          ? await service.accept(principal.workspace, req.params.id, body.design, actor)
+          : body.move === "reject"
+            ? await service.reject(principal.workspace, req.params.id, body.reason, actor)
+            : body.move === "ship"
+              ? await service.ship(principal.workspace, req.params.id, actor)
+              : await service.redraft(principal.workspace, req.params.id, actor);
+      return reply.send(record);
     } catch (err) {
       return sendError(reply, err);
     }

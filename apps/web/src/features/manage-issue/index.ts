@@ -1,6 +1,8 @@
 export {
   createIssueAction,
   deleteIssueAction,
+  setIssueChainAction,
+  type IssueChainMove,
   setIssueStatusAction,
   updateIssueAction,
   type IssueActionResult,

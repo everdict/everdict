@@ -259,6 +259,7 @@ interface IssueRow extends TrackerRow {
   label_ids: unknown;
   links: unknown;
   resolution: unknown;
+  chain: unknown;
   github: unknown;
   origin: unknown;
 }
@@ -282,6 +283,7 @@ interface IssueSummaryRow {
   assignee: string | null;
   label_ids: unknown;
   resolution: unknown;
+  chain: unknown;
   created_by: string;
   created_at: Date | string;
   updated_at: Date | string;
@@ -310,6 +312,7 @@ function rowToSummary(row: IssueSummaryRow): IssueSummary {
     labelIds: row.label_ids ?? [],
     linkCount: Number(row.link_count),
     ...(row.resolution !== null ? { resolution: row.resolution } : {}),
+    ...(row.chain !== null ? { chain: row.chain } : {}),
     // No repository = no GitHub copy: the column is derived from `github->>'repository'`, which is NULL exactly
     // when the jsonb is absent.
     ...(row.github_repository !== null
@@ -328,7 +331,7 @@ function rowToSummary(row: IssueSummaryRow): IssueSummary {
 }
 
 const ISSUE_COLUMNS =
-  "(id, tenant, number, identifier, former_identifiers, title, description, status, priority, estimate, due_date, parent_id, milestone_id, state_id, project_id, assignee, label_ids, links, resolution, github, history, created_by, origin, created_at, updated_at)";
+  "(id, tenant, number, identifier, former_identifiers, title, description, status, priority, estimate, due_date, parent_id, milestone_id, state_id, project_id, assignee, label_ids, links, resolution, chain, github, history, created_by, origin, created_at, updated_at)";
 const ISSUE_VALUES = insertPlaceholders(ISSUE_COLUMNS);
 
 function insertParams(record: IssueRecord): unknown[] {
@@ -352,6 +355,7 @@ function insertParams(record: IssueRecord): unknown[] {
     JSON.stringify(record.labelIds),
     JSON.stringify(record.links),
     record.resolution === undefined ? null : JSON.stringify(record.resolution),
+    record.chain === undefined ? null : JSON.stringify(record.chain),
     record.github === undefined ? null : JSON.stringify(record.github),
     JSON.stringify(record.history),
     record.createdBy,
@@ -382,6 +386,7 @@ function rowToRecord(row: IssueRow): IssueRecord {
     labelIds: row.label_ids ?? [],
     links: row.links ?? [],
     ...(row.resolution !== null ? { resolution: row.resolution } : {}),
+    ...(row.chain !== null ? { chain: row.chain } : {}),
     ...(row.github !== null ? { github: row.github } : {}),
     history: trackerHistory(row.history),
     createdBy: row.created_by,
@@ -682,7 +687,7 @@ export class PgIssueStore implements IssueStore {
        status=$8, priority=$9, estimate=$10, due_date=$11, parent_id=$12, milestone_id=$13,
        state_id=$14, project_id=$15, assignee=$16, label_ids=$17::jsonb, links=$18::jsonb,
        resolution=$19::jsonb, github=$20::jsonb, history=$21::jsonb, origin=$22::jsonb,
-       updated_at=$23::timestamptz`;
+       updated_at=$23::timestamptz, chain=$24::jsonb`;
     const params: unknown[] = [
       tenant,
       id,
@@ -707,6 +712,10 @@ export class PgIssueStore implements IssueStore {
       JSON.stringify(next.history),
       next.origin === undefined ? null : JSON.stringify(next.origin),
       next.updatedAt,
+      // Appended rather than slotted in beside `resolution`: the placeholders are positional, so inserting in
+      // the middle renumbers every one after it. The comment above says why being in this list matters at all
+      // — a field that transitions and is NOT listed here transitions silently into nothing.
+      next.chain === undefined ? null : JSON.stringify(next.chain),
     ];
     if (events && events.length > 0) {
       const ev = eventValuesClause(events, params.length + 1);

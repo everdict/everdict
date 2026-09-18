@@ -28,6 +28,7 @@ export const issueDocs: Record<
   | "get"
   | "lineage"
   | "update"
+  | "setChain"
   | "setStatus"
   | "link"
   | "unlink"
@@ -166,6 +167,15 @@ export const issueDocs: Record<
       200: { description: "The updated issue", ...toJsonSchema(IssueRecordSchema) },
       ...errorResponses(400, 401, 403, 404),
     },
+  },
+  setChain: {
+    summary: "Move a request along the work chain",
+    description:
+      "draft → accepted | rejected → shipped — the DESIGN axis, not the board. Accepting requires a `design`: " +
+      "the spec that governs it (refused when the path does not resolve) or one line declining it. Rejecting " +
+      "requires its reason. Shipping is reachable only from accepted. Requires issues:write.",
+    tags: ["issues"],
+    ...errorResponses,
   },
   setStatus: {
     summary: "Move an issue through the workflow",

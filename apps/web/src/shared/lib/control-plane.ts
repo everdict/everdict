@@ -816,6 +816,14 @@ export const controlPlane = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  // The WORK CHAIN, which is not the board (DEFAUL-39): draft → accepted | rejected → shipped, the axis that
+  // answers whether a request has been DESIGNED. Accepting carries its design — the spec that governs it, or
+  // one line saying why there is none — and the control plane refuses a spec path that does not resolve.
+  setIssueChain: <T>(auth: AuthContext, id: string, body: unknown) =>
+    call<T>(auth, `/issues/${encodeURIComponent(id)}/chain`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   // Project update — the only JUDGEMENT the tracker records (a verdict, and why it reads that way).
   postProjectUpdate: <T>(auth: AuthContext, id: string, body: unknown) =>
     call<T>(auth, `/projects/${encodeURIComponent(id)}/updates`, {

@@ -559,6 +559,75 @@ describe("issue store — the planning fields and the sub-issue tree", () => {
     expect(queries[0]?.params).toContain("urgent");
   });
 
+  // ── DEFAUL-39: A FIELD THAT TRANSITIONS MUST BE IN THE UPDATE'S SET CLAUSE ────────────────────────
+  //
+  // ⚠️ THE IN-MEMORY TWIN CANNOT SEE THIS. It spreads the patch (`{...current, ...patch}`), so `chain` travels
+  // there whatever the SQL says — every unit test over the service would stay green while Postgres silently
+  // dropped every acceptance. The store's own comment says it in the file: "a field that transitions must be
+  // listed here or the transition silently does nothing". This is that comment, made into a test.
+  it("writes the work chain on update, not only on insert", async () => {
+    // `update` is fetch-merge-write, so the fake has to ANSWER the read — a client that returns no rows makes
+    // the store return early and the assertion below would pass over an UPDATE that never ran.
+    const queries: { text: string; params?: unknown[] }[] = [];
+    const row = {
+      id: "a",
+      tenant: "acme",
+      number: 1,
+      identifier: "ENG-1",
+      former_identifiers: [],
+      title: "t",
+      description: null,
+      status: "todo",
+      priority: "none",
+      estimate: null,
+      due_date: null,
+      parent_id: null,
+      milestone_id: null,
+      state_id: null,
+      project_id: null,
+      assignee: null,
+      label_ids: [],
+      links: [],
+      resolution: null,
+      chain: null,
+      github: null,
+      history: [],
+      created_by: "dana",
+      origin: null,
+      created_at: "2026-07-31T00:00:00.000Z",
+      updated_at: "2026-07-31T00:00:00.000Z",
+    };
+    const client: SqlClient = {
+      async query<T>(text: string, params?: unknown[]) {
+        queries.push({ text, ...(params !== undefined ? { params } : {}) });
+        return { rows: [row as unknown as T] };
+      },
+    };
+    const chain = {
+      state: "accepted" as const,
+      at: "2026-09-18T00:00:00.000Z",
+      by: "dana",
+      design: { kind: "spec" as const, path: "docs/specs/work-chain-invariants-spec.md" },
+    };
+
+    await new PgIssueStore(client).update("acme", "a", { chain });
+
+    // The fetch-merge-write reads first, so the UPDATE is the second statement.
+    const update = queries.find((q) => q.text.includes("UPDATE everdict_issues SET"));
+    expect(update).toBeDefined();
+    expect(update?.text).toContain("chain=");
+    // …and the VALUE reaches the parameters. A SET clause naming the column with nothing bound to it would
+    // write null over an acceptance, which is worse than not writing it.
+    expect(update?.params).toContain(JSON.stringify(chain));
+  });
+
+  it("writes the work chain on insert", async () => {
+    const { client, queries } = pgClient();
+    await new PgIssueStore(client).create(issue({ id: "a", chain: { state: "draft" } }));
+    expect(queries[0]?.text).toContain("chain");
+    expect(queries[0]?.params).toContain(JSON.stringify({ state: "draft" }));
+  });
+
   it("narrows by parent in SQL — `null` becomes IS NULL, never an equality on the string 'null'", async () => {
     const { client, queries } = pgClient();
     await new PgIssueStore(client).list("acme", { parentId: null });

@@ -2,6 +2,7 @@ import {
   BadRequestError,
   ConflictError,
   ForbiddenError,
+  type IssueDesign,
   type IssueGithub,
   type IssueGithubSync,
   type IssueGroupBy,
@@ -117,6 +118,17 @@ export interface IssueServiceDeps {
   states?: IssueStateResolver;
   events?: PlatformEventEmitter;
   github?: IssueGithubPusher;
+  // ── DOES THE SPEC A REQUEST WAS ACCEPTED ON EXIST (DEFAUL-39 §2.4) ────────────────────────────────
+  //
+  // Accepting with `design: {kind:"spec", path}` names a file in this workspace's filesystem, and a pointer
+  // nobody can open is the same silence the declination exists to abolish, one indirection further out. The
+  // aggregate cannot read a filesystem, so the check lives here.
+  //
+  // OPTIONAL, and the consequence is stated rather than hidden: without it a `spec` acceptance is taken on
+  // trust. That is a deployment with no workspace filesystem — where the path could not be satisfied by
+  // anything — and refusing every spec acceptance there would leave `declined` as the only reachable arm,
+  // which is a worse answer than an unchecked pointer.
+  specs?: { exists: (tenant: string, path: string) => Promise<boolean> };
   newId?: () => string;
   now?: () => string;
 }
@@ -354,6 +366,41 @@ export class IssueService {
       });
     }
     return this.applyTransition(record, transition, actor);
+  }
+
+  // ── THE WORK CHAIN (DEFAUL-39, docs/specs/work-chain-invariants-spec.md) ──────────────────────────
+  //
+  // The chain moves on its own calls, never as a side effect of a workflow move: two axes, two questions.
+
+  async accept(tenant: string, id: string, design: IssueDesign, actor: IssueActor): Promise<IssueRecord> {
+    const record = await this.get(tenant, id);
+    // ⚠️ CHECKED BEFORE THE TRANSITION, so a refusal leaves nothing written — a refusal after a durable write
+    // is not a refusal (rule `protocol`).
+    if (design.kind === "spec" && this.deps.specs !== undefined) {
+      const exists = await this.deps.specs.exists(tenant, design.path);
+      if (!exists)
+        throw new NotFoundError(
+          "NOT_FOUND",
+          { issue: id, path: design.path },
+          `No file at '${design.path}' in this workspace — a request accepted on a design nobody can open is the silence the declination exists to end. Write the spec first, or accept with \`declined\` and say why there is none.`,
+        );
+    }
+    return this.applyTransition(record, Issue.from(record).accept(design, actor.subject, this.now()), actor);
+  }
+
+  async reject(tenant: string, id: string, reason: string, actor: IssueActor): Promise<IssueRecord> {
+    const record = await this.get(tenant, id);
+    return this.applyTransition(record, Issue.from(record).reject(reason, actor.subject, this.now()), actor);
+  }
+
+  async ship(tenant: string, id: string, actor: IssueActor): Promise<IssueRecord> {
+    const record = await this.get(tenant, id);
+    return this.applyTransition(record, Issue.from(record).ship(actor.subject, this.now()), actor);
+  }
+
+  async redraft(tenant: string, id: string, actor: IssueActor): Promise<IssueRecord> {
+    const record = await this.get(tenant, id);
+    return this.applyTransition(record, Issue.from(record).redraft(actor.subject, this.now()), actor);
   }
 
   async link(tenant: string, id: string, input: NewIssueLinkInput, actor: IssueActor): Promise<IssueRecord> {

@@ -312,6 +312,48 @@ export type IssueStatusCause = z.infer<typeof IssueStatusCauseSchema>;
 
 // How an issue was closed — the "how was it evaluated" half of the tracker's promise. `scorecardId` is the
 // evidence, and it doubles as the baseline the regression watch compares later scorecards against.
+// ── THE WORK CHAIN (DEFAUL-39, docs/specs/work-chain-invariants-spec.md) ────────────────────────────
+//
+// A SECOND AXIS, deliberately not a status. `ISSUE_STATUSES` is the board and every rollup, the release gate,
+// the pulse and the regression watch decide on its CATEGORY; the chain answers a different question — has
+// this been designed, decided, and shipped — and putting `accepted` in the enum would grow an arm on each of
+// those readers for a value that is not about progress ("a phase added to an object's life is a new arm for
+// every reader of that object").
+//
+// ⚠️ THE POINT IS THE STATE THIS MAKES UNREPRESENTABLE. `accepted` carries a `design` that is a UNION with no
+// third arm, because the file era's real invention was refusing "accepted with neither a spec nor a reason
+// there is none" — a state indistinguishable from "nobody picked it up", which was reported as a NOTE for as
+// long as it existed, during which the design stage ran once in eighteen changes. An optional `specPath`
+// would re-create it exactly: `undefined` reads as "the author did not say".
+export const IssueChainSchema = z.discriminatedUnion("state", [
+  z.object({ state: z.literal("draft") }),
+  z.object({
+    state: z.literal("accepted"),
+    at: z.string(),
+    by: z.string().min(1),
+    design: z.discriminatedUnion("kind", [
+      // The spec that governs this request, by its path in the workspace filesystem (`docs/specs/**`). The
+      // service refuses a path that does not resolve — a pointer nobody can open is the same silence the
+      // declination abolishes, one indirection further out.
+      z.object({ kind: z.literal("spec"), path: z.string().min(1).max(600) }),
+      // `Design: none — <why>`. A declination someone can read is a decision; silence is the drift.
+      z.object({ kind: z.literal("declined"), why: z.string().min(1).max(1000) }),
+    ]),
+  }),
+  z.object({
+    state: z.literal("rejected"),
+    at: z.string(),
+    by: z.string().min(1),
+    // Required, for the same reason the declination is: "the ideas that were turned down are half of what an
+    // intent home is for". `cancelled` with no reason does not satisfy that.
+    reason: z.string().min(1).max(2000),
+  }),
+  z.object({ state: z.literal("shipped"), at: z.string(), by: z.string().min(1) }),
+]);
+export type IssueChain = z.infer<typeof IssueChainSchema>;
+export type IssueChainState = IssueChain["state"];
+export type IssueDesign = Extract<IssueChain, { state: "accepted" }>["design"];
+
 export const IssueResolutionSchema = z.object({
   scorecardId: z.string().optional(),
   note: z.string().max(2000).optional(),
@@ -386,6 +428,11 @@ export const IssueRecordSchema = z.object({
   title: z.string().min(1),
   description: z.string().optional(),
   status: IssueStatusSchema,
+  // ⚠️ ABSENT IS A THIRD VALUE, NOT `draft` (spec §5). Every issue predating the chain has none, and reading
+  // that as "draft" would render an already-shipped request as one nobody has designed — and then accepting
+  // it would date its acceptance after its own commits. There is no backfill: an issue enters the chain when
+  // somebody accepts or rejects it, and until then the tracker honestly has two populations.
+  chain: IssueChainSchema.optional(),
   // How urgent, independent of where it sits in the workflow: a backlog item can be urgent and an in-progress
   // one can be nobody's priority. Defaulted rather than optional because "unprioritised" is a real answer that
   // every list has to draw, and an absent field would make every consumer invent the same fallback.

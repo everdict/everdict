@@ -1330,6 +1330,16 @@ async function main(): Promise<void> {
   });
   const issueService = new IssueService({
     store: issueStore,
+    // "Does the spec this request was accepted on exist" (DEFAUL-39 §2.4). The workspace filesystem is where
+    // specs live — `docs/specs/**`, reachable by `search_files` without naming an entity — so the existence
+    // check reads it. A DIRECTORY is not a spec: `stat` answers for both, and accepting on a folder would
+    // point at something nobody can read as a design.
+    specs: {
+      exists: async (tenant, path) => {
+        const entry = await workspaceFs.stat(tenant, path);
+        return entry !== undefined && entry.kind === "file";
+      },
+    },
     // The workspace mints `EVD-12`: one prefix, one counter, one conditional UPDATE (`0211`).
     numbers: issueNumberAllocator,
     scorecards: scorecardStore,

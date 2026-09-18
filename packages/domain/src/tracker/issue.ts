@@ -1,5 +1,7 @@
 import type {
   DomainFact,
+  IssueChain,
+  IssueDesign,
   IssueGithub,
   IssueGithubComment,
   IssueGithubSync,
@@ -495,6 +497,103 @@ export class Issue {
     });
     patch.updatedAt = now;
     return { patch, facts: [] };
+  }
+
+  // ── THE WORK CHAIN (DEFAUL-39, docs/specs/work-chain-invariants-spec.md §2.3) ─────────────────────
+  //
+  // A second axis beside the workflow status, and the two never move each other: they answer different
+  // questions, and a convenience that flipped one from the other would be a second authority on one fact.
+
+  // ⚠️ `design` IS A REQUIRED PARAMETER, and that is the invariant — not a check inside. There is no overload
+  // without it, so "accepted with neither a spec nor a reason there is none" cannot be expressed by a caller
+  // at all. Unrepresentable beats refused: a refusal lives at a call site somebody might not reach.
+  //
+  // The path in `{kind:"spec"}` is checked for EXISTENCE by the service, which holds the filesystem; the
+  // aggregate cannot read it and does not pretend to.
+  accept(design: IssueDesign, by: string, now: string): IssueTransition {
+    const chain = this.record.chain;
+    // Absent counts as draft HERE and only here: entering the chain is exactly the act that ends "born before
+    // this existed". Everywhere else absent stays a third value (contracts, `IssueRecord.chain`).
+    if (chain !== undefined && chain.state !== "draft")
+      throw new ConflictError(
+        "CONFLICT",
+        { issue: this.record.id, chain: chain.state },
+        chain.state === "accepted"
+          ? "This request is already accepted — an acceptance is not re-taken, and re-dating it would re-date every commit that claims it."
+          : `This request is ${chain.state} — move it back to draft before accepting it, so the reversal is on the record.`,
+      );
+    return this.chainTransition({ state: "accepted", at: now, by, design }, by, now);
+  }
+
+  // A rejection KEEPS ITS REASON: "the ideas that were turned down are half of what an intent home is for",
+  // and a `cancelled` status with no required reason does not satisfy that.
+  reject(reason: string, by: string, now: string): IssueTransition {
+    const chain = this.record.chain;
+    if (chain?.state === "shipped")
+      throw new ConflictError(
+        "CONFLICT",
+        { issue: this.record.id, chain: chain.state },
+        "This request shipped — it cannot be rejected afterwards; record what went wrong as a new request.",
+      );
+    if (chain?.state === "rejected")
+      throw new ConflictError(
+        "CONFLICT",
+        { issue: this.record.id, chain: chain.state },
+        "This request is already rejected.",
+      );
+    return this.chainTransition({ state: "rejected", at: now, by, reason }, by, now);
+  }
+
+  // ⚠️ THE INVARIANT WITH TEETH. `shipped` is reachable only THROUGH an acceptance, so it always has a time
+  // behind it — which is what makes the commit-order witness (spec §3) mean anything. A request that could
+  // ship from draft would let a commit claim an acceptance that never happened.
+  ship(by: string, now: string): IssueTransition {
+    const chain = this.record.chain;
+    if (chain === undefined || chain.state !== "accepted")
+      throw new ConflictError(
+        "CONFLICT",
+        { issue: this.record.id, chain: chain?.state ?? "none" },
+        chain === undefined
+          ? "This request predates the work chain and has never been accepted — accept it first, and its acceptance will be dated now rather than backwards."
+          : `This request is ${chain.state} — only an accepted request ships, because 'shipped' is what an acceptance leads to.`,
+      );
+    return this.chainTransition({ state: "shipped", at: now, by }, by, now);
+  }
+
+  // Back to draft, so a rejection can be reconsidered without the reversal being invisible.
+  redraft(by: string, now: string): IssueTransition {
+    const chain = this.record.chain;
+    if (chain === undefined || chain.state === "draft")
+      throw new ConflictError(
+        "CONFLICT",
+        { issue: this.record.id, chain: chain?.state ?? "none" },
+        "This request is not in a chain state that can be redrafted.",
+      );
+    if (chain.state === "shipped")
+      throw new ConflictError(
+        "CONFLICT",
+        { issue: this.record.id, chain: chain.state },
+        "This request shipped — its chain is history, not a draft.",
+      );
+    return this.chainTransition({ state: "draft" }, by, now);
+  }
+
+  private chainTransition(chain: IssueChain, by: string, now: string): IssueTransition {
+    return {
+      patch: {
+        chain,
+        // The move is in the history like every other one, so "when was this accepted, and by whom" survives
+        // a later re-acceptance being refused.
+        history: appendHistory(this.record.history, {
+          at: now,
+          by,
+          event: "updated",
+          detail: { changed: ["chain"], chain: chain.state },
+        }),
+        updatedAt: now,
+      },
+      facts: [],
+    };
   }
 
   // Ordinary workflow movement between OPEN states, plus cancellation. Reaching `done` goes through resolve()

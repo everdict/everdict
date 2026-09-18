@@ -1,5 +1,6 @@
 import type { IssueListFilter } from "@everdict/application-control";
 import {
+  BadRequestError,
   IssueGroupBySchema,
   IssueLinkTypeSchema,
   IssueOrderSchema,
@@ -275,6 +276,71 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
           ),
         ),
       ),
+  );
+
+  // ── THE WORK CHAIN (DEFAUL-39) ───────────────────────────────────────────────────────────────────
+  //
+  // A SECOND AXIS beside the workflow status, moved by its own call. `set_issue_status` is the board; this is
+  // "has this been designed, decided, and shipped", and a tool that moved both would make one refusal answer
+  // two questions.
+  server.registerTool(
+    "set_issue_chain",
+    {
+      annotations: { readOnlyHint: false },
+      description:
+        "Move a request along the WORK CHAIN — draft → accepted | rejected → shipped. This is not the board " +
+        "(`set_issue_status`); it answers whether the request has been DESIGNED, decided, and shipped. " +
+        "⚠️ `accept` REQUIRES a `design`, and it is a choice of two rather than an optional field: " +
+        '`{kind:"spec", path}` names the spec that governs it in this workspace\'s filesystem (docs/specs/**, ' +
+        'and a path that does not resolve is REFUSED), or `{kind:"declined", why}` says in one line why there ' +
+        "is none. Accepted-with-neither is the state this exists to abolish: it is indistinguishable from " +
+        "'nobody picked it up', and while it was merely a note the design stage ran once in eighteen changes. " +
+        "`reject` REQUIRES its reason — the ideas that were turned down are half of what an intent home is for. " +
+        "`ship` is reachable only from `accepted`, which is what gives a shipped request an acceptance with a " +
+        "time behind it. `redraft` reverses a rejection, on the record. An issue with no chain predates this " +
+        "and is not a draft: accepting it dates its acceptance NOW, never backwards.",
+      inputSchema: {
+        id: z.string(),
+        move: z.enum(["accept", "reject", "ship", "redraft"]),
+        design: z
+          .discriminatedUnion("kind", [
+            z.object({ kind: z.literal("spec"), path: z.string().min(1).max(600) }),
+            z.object({ kind: z.literal("declined"), why: z.string().min(1).max(1000) }),
+          ])
+          .optional()
+          .describe("accept only, and REQUIRED there — the spec that governs this, or why there is none"),
+        reason: z.string().min(1).max(2000).optional().describe("reject only, and REQUIRED there"),
+      },
+    },
+    (a) =>
+      run(principal, "issues:write", async () => {
+        switch (a.move) {
+          case "accept": {
+            // The tool schema cannot make `design` required only for this arm, so the door refuses rather than
+            // defaulting: a default here would re-create the very state the union removed.
+            if (a.design === undefined)
+              throw new BadRequestError(
+                "BAD_REQUEST",
+                { issue: a.id },
+                'Accepting a request names its design: {kind:"spec", path} or {kind:"declined", why}. There is no third answer — "accepted, and nobody said" is the state this refuses.',
+              );
+            return ok(await issues.accept(ws, a.id, a.design, actor));
+          }
+          case "reject": {
+            if (a.reason === undefined)
+              throw new BadRequestError(
+                "BAD_REQUEST",
+                { issue: a.id },
+                "Rejecting a request keeps its reason — the ideas that were turned down are half of what an intent home is for.",
+              );
+            return ok(await issues.reject(ws, a.id, a.reason, actor));
+          }
+          case "ship":
+            return ok(await issues.ship(ws, a.id, actor));
+          case "redraft":
+            return ok(await issues.redraft(ws, a.id, actor));
+        }
+      }),
   );
 
   server.registerTool(
