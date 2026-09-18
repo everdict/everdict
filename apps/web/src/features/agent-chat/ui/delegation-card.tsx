@@ -6,6 +6,7 @@ import {
   ChevronRight,
   CircleCheck,
   LoaderCircle,
+  OctagonX,
   TriangleAlert,
   UserRoundCog,
 } from 'lucide-react'
@@ -62,6 +63,8 @@ export const DelegationCard = memo(function DelegationCard({
   const sessionRunId = delegation.sessionRunId
   const ended = view !== null && view.live === undefined
   const busy = tasks.some((task) => task.status === 'running' || task.status === 'queued')
+  const [interrupting, setInterrupting] = useState(false)
+  const [interruptError, setInterruptError] = useState<string>()
 
   const refresh = useCallback(async (id: string) => {
     try {
@@ -108,6 +111,33 @@ export const DelegationCard = memo(function DelegationCard({
       inflight.current.delete(taskId)
     }
   }, [])
+
+  // STOP THE TURN, KEEP THE DELEGATE. The reason is asked for rather than optional in practice: it lands on
+  // the trajectory, and a supervisor reading back six interrupts wants to know why each one happened. Cancelling
+  // the prompt cancels the interrupt — an empty reason would record that somebody stopped it and say nothing.
+  const interrupt = useCallback(async () => {
+    if (sessionRunId === undefined) return
+    const reason = window.prompt(t('interruptReasonPrompt'))
+    if (reason === null) return
+    setInterruptError(undefined)
+    setInterrupting(true)
+    try {
+      const res = await fetch(`/api/sandboxes/${encodeURIComponent(sessionRunId)}/interrupt`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(reason.trim().length > 0 ? { reason: reason.trim() } : {}),
+      })
+      if (!res.ok) {
+        setInterruptError(t('interruptError'))
+        return
+      }
+      await refresh(sessionRunId)
+    } catch {
+      setInterruptError(t('interruptError'))
+    } finally {
+      setInterrupting(false)
+    }
+  }, [sessionRunId, refresh, t])
 
   // Expanded: attach. Reconciles the session, then replays every turn we have not read and follows the running
   // one. Skipped while the document is hidden, and torn down the moment the card folds again.
@@ -198,6 +228,28 @@ export const DelegationCard = memo(function DelegationCard({
             <span className="shrink-0 tabular-nums text-faint">{tasks.length}</span>
           )}
         </button>
+
+        {/* Shown only while a turn is actually in flight: a control that can only answer 409 is not a
+            control. `interrupt` aborts the TURN and keeps the container, the working directory and the
+            conversation — the delegate takes the next instruction immediately. Closing destroys all of it,
+            which is why a supervisor who suspected the work was going the wrong way used to just wait. */}
+        {busy && sessionRunId !== undefined && !ended && (
+          <div className="flex items-center gap-2 px-2.5 pb-2">
+            <button
+              type="button"
+              onClick={interrupt}
+              disabled={interrupting}
+              title={t('interruptTitle')}
+              className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[11.5px] text-muted-foreground hover:text-foreground disabled:opacity-50"
+            >
+              <OctagonX className="size-3.5" aria-hidden />
+              {interrupting ? t('interrupting') : t('interrupt')}
+            </button>
+            {interruptError !== undefined && (
+              <span className="text-[11.5px] text-destructive">{interruptError}</span>
+            )}
+          </div>
+        )}
 
         {delegation.status === 'failed' && (
           <div className="px-2.5 pb-2">

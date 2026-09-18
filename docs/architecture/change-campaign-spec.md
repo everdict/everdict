@@ -2,7 +2,7 @@
 kind: spec
 title: "Every code change is a campaign — one lineage from the request to what shipped and what it taught, enforced by the plugin"
 status: accepted
-updated: 2026-09-16
+updated: 2026-09-18
 anchors: [packages/contracts/src/records/evolution-campaign.ts, packages/contracts/src/records/change-campaign.ts, packages/domain/src/evolution/change-campaign.ts, packages/contracts/src/knowledge/node-type.ts, packages/contracts/src/records/tracker.ts, plugin/.claude-plugin/plugin.json, plugin/hooks/hooks.json]
 ---
 # Every code change is a campaign — one lineage from the request to what shipped and what it taught
@@ -418,9 +418,24 @@ the seam that cannot be bypassed is the repository's own push gate, and moving i
    be a second authority that can disagree with them), and it names the sources it could not read, because an
    unwired collaborator must not read as a request that caused nothing.
 
-**Still open:** the `continues` chain is carried for the evaluated grade only — a change campaign cannot yet
-name the one it continues, so a walk of change campaigns is a list rather than a tree. And the evaluated
-campaigns are filtered by issue in memory, because that store lists by subject.
+6. ✅ **The walk** (2026-09-18, DEFAUL-47). The read answered one hop and stopped, which answers "what did
+   this cause" and not "how did it come to be" — and the edges for the second question were all stored while
+   nothing followed them. `assemble` now takes a **depth the caller declares** (1–5; 1 is the request's own
+   records, so no existing caller moved) and walks `continues` on BOTH grades and `supersedes` on knowledge,
+   so a retracted claim is reachable from the request whose work replaced it. Each item carries the hop that
+   reached it, and an ancestor reached only by supersession says which entry replaced it — `reachedBy` gains a
+   third way in rather than pretending an entry nobody pinned is unreachable. A depth outside the range is
+   REFUSED rather than clamped. `walk` reports how the traversal ended as three counts, each a different thing
+   to do about it: `truncated` (ask again with more depth), `cycles` (a defect in the records, not the
+   reading) and `unresolved` (a step this deployment could not fetch — unknown, never absent). The change
+   grade also starts EMITTING `continues`, which it stored from the start and never reported, so every
+   partially-adopted request had an invisible successor chain. The issue screen asks for depth 3 and renders
+   ancestors inset by their hop, because a capability is not built until it reaches the web.
+
+**Still open:** the evaluated campaigns are filtered by issue in memory, because that store lists by subject —
+honest and O(n), worth an indexed read when a workspace's campaign count makes it matter. And the walk does
+not follow the **sub-issue** axis: `open_change_campaign` instructs splitting a bundled request into
+sub-issues, so a split request's lineage still scatters into children the parent's read cannot see.
 
 ## The questions this spec opened, and how they were answered
 

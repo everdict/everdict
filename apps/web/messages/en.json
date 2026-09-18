@@ -4074,7 +4074,12 @@
     "delegationFailed": "The delegation did not open.",
     "delegationEnded": "That session has ended — its turns are on the run ledger.",
     "delegationNoTurns": "No turns yet.",
-    "delegationOpenInPlayground": "Open in playground"
+    "delegationOpenInPlayground": "Open in playground",
+    "interrupt": "Interrupt",
+    "interrupting": "Interrupting…",
+    "interruptTitle": "Stop the current turn and keep the delegate — its container, working directory and conversation survive, and it takes your next instruction immediately.",
+    "interruptReasonPrompt": "Why are you stopping this turn? The reason lands on the delegate's trajectory.",
+    "interruptError": "Could not interrupt the turn."
   },
   "workspaceSettings": {
     "saved": "Saved",

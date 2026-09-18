@@ -585,6 +585,16 @@ export const controlPlane = {
     }),
   closeSandbox: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/sandboxes/${encodeURIComponent(id)}/close`, { method: 'POST' }),
+  // Stop the delegate's CURRENT TURN and leave it able to take the next one — not `close`, which destroys the
+  // container and every uncommitted change in it. Before this verb existed the only way to stop a delegate
+  // going the wrong way was to end the session, so the cost of being wrong about "this is going badly" was the
+  // whole session and the rational move was to wait and watch it finish. The reason lands on the trajectory:
+  // a supervisor reading back six interrupts wants to know why each happened.
+  interruptSandbox: <T>(auth: AuthContext, id: string, reason?: string) =>
+    call<T>(auth, `/sandboxes/${encodeURIComponent(id)}/interrupt`, {
+      method: 'POST',
+      body: JSON.stringify(reason === undefined ? {} : { reason }),
+    }),
   // One-shot `sh -c` inside a live session's container (the playground's shell disclosure) — creator-or-admin,
   // enforced by the control plane before anything runs.
   execInSandbox: <T>(auth: AuthContext, id: string, body: unknown) =>
@@ -842,10 +852,10 @@ export const controlPlane = {
     const query = new URLSearchParams()
     if (where?.dataset !== undefined) query.set('dataset', where.dataset)
     if (where?.repository !== undefined) query.set('repository', where.repository)
-    const suffix = query.size === 0 ? '' : `?${query.toString()}`
+    const qs = query.toString()
     return call<T>(
       auth,
-      `/issues/${encodeURIComponent(id)}/links/${encodeURIComponent(type)}/${encodeURIComponent(linkId)}${suffix}`,
+      `/issues/${encodeURIComponent(id)}/links/${encodeURIComponent(type)}/${encodeURIComponent(linkId)}${qs ? `?${qs}` : ''}`,
       { method: 'DELETE' }
     )
   },
@@ -1599,12 +1609,14 @@ export const controlPlane = {
   getCapability: <T>(auth: AuthContext, id: string, version?: string, source?: string) => {
     const q = new URLSearchParams()
     if (source) q.set('source', source)
-    const suffix = q.toString() ? `?${q.toString()}` : ''
+    // The `?` belongs in the TEMPLATE, not in the variable: a tail spelled `${suffix}` reads as a path
+    // segment to anything scanning these strings, and that is how a real caller was once reported missing.
+    const qs = q.toString()
     return call<T>(
       auth,
       version
-        ? `/capabilities/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}${suffix}`
-        : `/capabilities/${encodeURIComponent(id)}${suffix}`
+        ? `/capabilities/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}${qs ? `?${qs}` : ''}`
+        : `/capabilities/${encodeURIComponent(id)}${qs ? `?${qs}` : ''}`
     )
   },
   // Versioning (parity with the registry entities) — version list, structural diff, version tags (creator-or-admin). `source` = the cross-tenant public/subset owner.

@@ -139,6 +139,18 @@ const walk = (dir, out = []) => {
 // A trailing `${…}` that BUILDS A QUERY STRING is not a path segment. It cannot be matched with a regex,
 // because the group nests: `/runs/${id}/logs${stream ? `?stream=${encodeURIComponent(stream)}` : ""}`. So the tail is
 // found by balancing braces, and dropped when its text contains a `?` or names a query variable.
+//
+// ⚠️ FOURTH INSTANCE, 2026-09-18. The name list below was a heuristic over an identifier, and the client had a
+// caller spelled `…/${linkId}${suffix}` — with the `?` moved into the variable's ASSIGNMENT, so the inner text
+// is a bare name the list does not carry. The tail was read as a path segment, the path came out
+// `/issues/:p/links/:p/:p:p`, and the gate reported "no caller" for a caller that was right there. A census
+// that invents a gap costs exactly what a census that misses one costs: the next reader stops believing it.
+//
+// So a tail this function CANNOT classify is now a third value rather than a guess in either direction. It is
+// not stripped and not kept — it is reported, and the author spells the query inline (`${qs ? `?${qs}` : ""}`),
+// which is what the four other callers in the client already do. A declaration cannot be misread; a heuristic
+// over a variable name gets re-litigated every time somebody names one differently.
+const unclassifiedTails = [];
 const stripTrailingQuery = (path) => {
   if (!path.endsWith("}")) return path;
   let depth = 0;
@@ -149,7 +161,15 @@ const stripTrailingQuery = (path) => {
       if (depth === 0) {
         if (path[i - 1] !== "$") return path;
         const inner = path.slice(i + 1, -1);
-        return /\?|^\s*(qs|query|search|params)\s*$/.test(inner) ? path.slice(0, i - 1) : path;
+        if (/\?/.test(inner)) return path.slice(0, i - 1);
+        if (/^\s*(qs|query|search|params)\s*$/.test(inner)) return path.slice(0, i - 1);
+        // A bare identifier AFTER a `?` already in the literal is unambiguous — it interpolates a query
+        // VALUE, and the `.split("?")` in `normalize` drops the whole query anyway. Only a bare identifier
+        // appended to a path with no query at all is the ambiguous case: it could be a query string built
+        // elsewhere, or a genuine last path segment, and both guesses have produced a false census before.
+        if (!path.slice(0, i - 1).includes("?") && /^\s*[A-Za-z_$][A-Za-z0-9_$]*\s*$/.test(inner))
+          unclassifiedTails.push({ path, inner: inner.trim() });
+        return path;
       }
     }
   }
@@ -257,6 +277,17 @@ for (const route of [...routes].sort()) {
 }
 for (const stale of unusedDecisions)
   failures.push(`${stale} is in DECIDED and is not a route any more — drop the line`);
+
+// A tail this scan could not classify is reported BEFORE any reachability verdict that depends on it, because
+// the verdict is the thing that would be wrong. Both readings have produced a false census: stripping a real
+// segment hides a gap, keeping a query string invents one.
+failures.unshift(
+  ...unclassifiedTails.map(
+    ({ path, inner }) =>
+      `${path} ends in \`\${${inner}}\` and this scan cannot tell a query string from a path segment — ` +
+      `spell it inline (\`\${${inner} ? \`?\${${inner}}\` : ""}\`) so the shape says which it is`,
+  ),
+);
 
 if (failures.length) {
   console.error(`web reach check FAILED — ${failures.length} problem(s):\n`);
