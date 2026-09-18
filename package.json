@@ -25,6 +25,7 @@
     "import-cycles": "node scripts/check-import-cycles.mjs",
     "protocol-mutations": "node scripts/trust/protocol-mutations.mjs",
     "plugin-manifests": "node scripts/check-plugin-manifests.mjs",
+    "plugin-version": "node scripts/check-plugin-version.mjs",
     "plugin-hooks": "node scripts/check-plugin-hooks.mjs",
     "docs-check": "node scripts/check-docs.mjs",
     "scanner-watches": "node scripts/check-scanner-watches.mjs",
