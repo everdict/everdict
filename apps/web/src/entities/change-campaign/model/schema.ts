@@ -1,4 +1,8 @@
-import type { ChangeCampaignView, ChangeRound as WireChangeRound } from '@everdict/contracts'
+import type {
+  ChangeCampaignSummary,
+  ChangeCampaignView,
+  ChangeRound as WireChangeRound,
+} from '@everdict/contracts'
 import { z } from 'zod'
 
 // A local mirror of the control plane's `change` grade (apps/api `/change-campaigns`). Mirrored rather than
@@ -82,6 +86,43 @@ export const changeRoundSchema = z.object({
   learned: z.string().optional(),
 })
 
+// Shared by the detail and the list row — ONE definition, because two copies of a shape grow their next
+// field in one of them and the drift guard only catches what the wire renames, not what this file forgets.
+export const changeCampaignCloseSchema = z.object({
+  at: z.string(),
+  by: z.string(),
+  state: z.enum(['adopted', 'partially_adopted', 'abandoned']),
+  reason: z.string(),
+  roundSeq: z.number().optional(),
+  landed: z.array(z.object({ repository: z.string(), path: z.string().optional() })).default([]),
+  remaining: z.array(z.object({ repository: z.string(), path: z.string().optional() })).default([]),
+  knowledge: z.array(z.string()).default([]),
+  knowledgeDeclined: z.string().optional(),
+})
+
+// THE ACCOUNT THE REQUEST IS OWED, derived by the control plane on every read: how many things were asked
+// for, how many settled, and what is blocking each of the rest. Mirrored as REQUIRED — the guard below only
+// catches a dropped field when both sides require it, and a field this schema declares optional is one the
+// parse silently drops while the screen renders as though it was never sent.
+export const requirementRollupSchema = z.object({
+  total: z.number(),
+  settled: z.number(),
+  unsettled: z.array(
+    z.object({
+      issueId: z.string(),
+      criterionIds: z.array(z.string()),
+      blockers: z.array(
+        z.object({
+          criterionId: z.string(),
+          answer: z.enum(['not_met', 'not_run']),
+          reason: unmetReasonSchema,
+        })
+      ),
+    })
+  ),
+  unclassifiedCriteria: z.number(),
+})
+
 export const changeCampaignSchema = z.object({
   id: z.string(),
   tenant: z.string(),
@@ -104,23 +145,7 @@ export const changeCampaignSchema = z.object({
   ),
   rounds: z.array(changeRoundSchema).default([]),
   state: z.enum(['open', 'adopted', 'partially_adopted', 'abandoned']),
-  close: z
-    .object({
-      at: z.string(),
-      by: z.string(),
-      state: z.enum(['adopted', 'partially_adopted', 'abandoned']),
-      reason: z.string(),
-      roundSeq: z.number().optional(),
-      landed: z
-        .array(z.object({ repository: z.string(), path: z.string().optional() }))
-        .default([]),
-      remaining: z
-        .array(z.object({ repository: z.string(), path: z.string().optional() }))
-        .default([]),
-      knowledge: z.array(z.string()).default([]),
-      knowledgeDeclined: z.string().optional(),
-    })
-    .optional(),
+  close: changeCampaignCloseSchema.optional(),
   createdBy: z.string(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -128,24 +153,51 @@ export const changeCampaignSchema = z.object({
   // for, how many settled, and what is blocking each of the rest. Mirrored as REQUIRED — the guard below only
   // catches a dropped field when both sides require it, and a field this schema declares optional is one the
   // parse silently drops while the screen renders as though it was never sent.
-  requirements: z.object({
+  requirements: requirementRollupSchema,
+})
+
+// ── THE LIST ROW (DEFAUL-36) ─────────────────────────────────────────────────────────────────────────
+//
+// A SEPARATE mirror, not `changeCampaignSchema.partial()`: the list and the detail are different answers, and
+// a shared schema with everything optional would parse either one and tell the screen nothing about which it
+// got. `GET /change-campaigns` projects the rounds away — nine campaigns returned in full came to 85,793
+// characters — so a row carries the account (`requirements`), how many criteria were declared, and the rounds
+// as a count plus the LATEST verdict. Everything else is one click away on the campaign page.
+export const changeCampaignSummarySchema = z.object({
+  id: z.string(),
+  tenant: z.string(),
+  issueId: z.string(),
+  service: z.object({ repository: z.string(), path: z.string().optional() }),
+  continues: z.string().optional(),
+  criteriaCount: z.number(),
+  rounds: z.object({
     total: z.number(),
-    settled: z.number(),
-    unsettled: z.array(
-      z.object({
-        issueId: z.string(),
-        criterionIds: z.array(z.string()),
-        blockers: z.array(
-          z.object({
-            criterionId: z.string(),
-            answer: z.enum(['not_met', 'not_run']),
-            reason: unmetReasonSchema,
-          })
-        ),
+    // Absent = opened, not attempted. Distinct from `total: 0` with a zeroed digest, which would read as a
+    // round nobody judged.
+    latest: z
+      .object({
+        seq: z.number(),
+        outcome: z.enum(['adopted', 'rejected']),
+        at: z.string(),
+        by: z.string(),
+        delegationRunId: z.string().optional(),
       })
-    ),
-    unclassifiedCriteria: z.number(),
+      .optional(),
   }),
+  state: z.enum(['open', 'adopted', 'partially_adopted', 'abandoned']),
+  close: changeCampaignCloseSchema.optional(),
+  createdBy: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  requirements: requirementRollupSchema,
+})
+
+// WHAT THE PAGE SAYS ABOUT BEING A PAGE. `available` is how many matched, against how many came back — the
+// web used to infer this from a full page (`rows.length >= WINDOW`), which is the caller rebuilding a fact the
+// answer should have carried and gets wrong whenever the corpus is exactly one page long.
+export const changeCampaignPageSchema = z.object({
+  items: z.array(changeCampaignSummarySchema),
+  available: z.number(),
 })
 
 // Drift guard — the local schema and the wire contract stay mutually assignable, so a RENAMED field, a
@@ -163,12 +215,23 @@ type _campaignFwd = AssertAssignable<WebChangeCampaign, ChangeCampaignView>
 type _campaignBack = AssertAssignable<ChangeCampaignView, WebChangeCampaign>
 type _roundFwd = AssertAssignable<WebChangeRound, WireChangeRound>
 type _roundBack = AssertAssignable<WireChangeRound, WebChangeRound>
+type WebChangeCampaignSummary = z.infer<typeof changeCampaignSummarySchema>
+type _summaryFwd = AssertAssignable<WebChangeCampaignSummary, ChangeCampaignSummary>
+type _summaryBack = AssertAssignable<ChangeCampaignSummary, WebChangeCampaignSummary>
 
 export type ChangeCampaign = ChangeCampaignView
+export type ChangeCampaignRow = ChangeCampaignSummary
 export type ChangeRound = WireChangeRound
 
 // Reference the guards so unused-type lint never strips them.
-export type __changeCampaignDriftGuard = [_campaignFwd, _campaignBack, _roundFwd, _roundBack]
+export type __changeCampaignDriftGuard = [
+  _campaignFwd,
+  _campaignBack,
+  _roundFwd,
+  _roundBack,
+  _summaryFwd,
+  _summaryBack,
+]
 
 export const changeCampaignHref = (workspace: string, id: string) =>
   `/${workspace}/change-campaign/${id}`

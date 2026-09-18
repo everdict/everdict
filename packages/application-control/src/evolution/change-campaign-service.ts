@@ -1,7 +1,9 @@
 import {
   BadRequestError,
   type ChangeCampaignClose,
+  type ChangeCampaignPage,
   type ChangeCampaignRecord,
+  type ChangeCampaignSummary,
   type ChangeCampaignView,
   type ChangeCriterion,
   type ChangeJudgementAnswer,
@@ -245,8 +247,21 @@ export class ChangeCampaignService {
     return withRequirements(await this.require(tenant, id));
   }
 
-  async list(tenant: string, options?: { issueId?: string; limit?: number }): Promise<ChangeCampaignView[]> {
-    return (await this.deps.store.list(tenant, options)).map(withRequirements);
+  // ── A ROW IS A SUMMARY (DEFAUL-36) ────────────────────────────────────────────────────────────────
+  //
+  // This returned the whole view per campaign, rounds included, and nine campaigns came to 85,793 characters
+  // over 1,905 lines — past the caller's output limit, spilled to a file. The rounds are the bulk and they
+  // are all reachable one call away, so the row keeps what a row is FOR (which request, which service, where
+  // it ended, what the request is still owed) and projects the rest into a count plus the latest verdict.
+  //
+  // `available` is counted rather than inferred from the page: a full page and a corpus exactly that size are
+  // the same array, so a caller cannot tell "there is more" from "that was all" without being told.
+  async list(tenant: string, options?: { issueId?: string; limit?: number }): Promise<ChangeCampaignPage> {
+    const [records, available] = await Promise.all([
+      this.deps.store.list(tenant, options),
+      this.deps.store.count(tenant, options?.issueId !== undefined ? { issueId: options.issueId } : undefined),
+    ]);
+    return { items: records.map(summarise), available };
   }
 
   // ── WHAT THE DELEGATION PRODUCED, READ FROM THE DELEGATION ────────────────────────────────────────
@@ -398,6 +413,34 @@ export class ChangeCampaignService {
 // every round answer every declared criterion, so the newest answer set is a complete picture rather than a
 // delta some reader has to fold over the earlier ones. A campaign with no rounds yet has nothing settled —
 // which is the truthful reading of "opened, not attempted", not an empty count.
+// The row, from the record. `rounds` becomes a count plus the LATEST round's verdict — not an omitted field,
+// because a campaign with four rejected attempts and one that has never been attempted must not render alike.
+// The latest round is also the current standing (every round answers every criterion), so the digest is a
+// complete verdict rather than a delta someone has to fold.
+function summarise(record: ChangeCampaignRecord): ChangeCampaignSummary {
+  const { rounds, criteria, ...rest } = record;
+  const latest = rounds.at(-1);
+  return {
+    ...rest,
+    requirements: summariseRequirements(criteria, latest?.judgement.answers ?? []),
+    criteriaCount: criteria.length,
+    rounds: {
+      total: rounds.length,
+      ...(latest !== undefined
+        ? {
+            latest: {
+              seq: latest.seq,
+              outcome: latest.outcome,
+              at: latest.judgement.at,
+              by: latest.judgement.by,
+              ...(latest.delegation !== undefined ? { delegationRunId: latest.delegation.runId } : {}),
+            },
+          }
+        : {}),
+    },
+  };
+}
+
 function withRequirements(record: ChangeCampaignRecord): ChangeCampaignView {
   const latest = record.rounds.at(-1);
   return {

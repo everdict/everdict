@@ -67,8 +67,13 @@ describe("change campaigns over HTTP", () => {
     expect(read.statusCode).toBe(200);
     expect(read.json().id).toBe(campaign.id);
 
+    // The list is a PAGE of SUMMARY rows (DEFAUL-36): the rounds' bodies live on the read above, and the
+    // response says how many matched so a caller never has to infer truncation from a full page.
     const listed = await app.inject({ method: "GET", url: "/change-campaigns?issueId=i-1", headers: H });
-    expect(listed.json().map((c: { id: string }) => c.id)).toEqual([campaign.id]);
+    const page = listed.json() as { items: { id: string; rounds: { total: number } }[]; available: number };
+    expect(page.items.map((c) => c.id)).toEqual([campaign.id]);
+    expect(page.available).toBe(1);
+    expect(page.items[0]?.rounds).toEqual({ total: 0 });
   });
 
   it("refuses a second open campaign for the same request (409), naming the one in the way", async () => {

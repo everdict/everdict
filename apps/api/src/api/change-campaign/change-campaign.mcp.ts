@@ -148,7 +148,8 @@ export function registerChangeCampaignTools(server: McpServer, ctx: McpToolConte
     "list_change_campaigns",
     {
       annotations: { readOnlyHint: true },
-      description: "Change campaigns, newest first. `issue_id` narrows to one request's attempts.",
+      description:
+        "Change campaigns, newest first, as SUMMARY rows — which request, which service, where it ended, what the request is still owed (`requirements`), how many criteria were declared, and `rounds` as a count plus the LATEST round's verdict (its seq, outcome, who judged it and when, and the delegation that produced it when a work agent did). The rounds themselves — hypotheses, change sets, gate metrics, per-criterion answers, what each taught — are one call away on `get_change_campaign`, because nine campaigns returned in full came to 85,793 characters and exceeded a caller's output limit. `available` says how many campaigns matched against how many came back, so a full page and a corpus exactly that size stop reading alike. `issue_id` narrows to one request's attempts.",
       inputSchema: {
         issue_id: z.string().min(1).optional(),
         limit: z.number().int().positive().max(500).optional(),

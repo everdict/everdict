@@ -39,7 +39,10 @@ export const changeCampaignDocs: Record<"open" | "round" | "close" | "get" | "li
   get: { summary: "Read a change campaign", tags: ["campaigns"], ...errorResponses },
   list: {
     summary: "List change campaigns",
-    description: "Newest first; `issueId` narrows to one request's attempts.",
+    description:
+      "Newest first, as SUMMARY rows: the rounds are projected to a count plus the latest round's verdict, " +
+      "and the round bodies live on GET /change-campaigns/:id. `available` says how many matched against how " +
+      "many came back. `issueId` narrows to one request's attempts.",
     tags: ["campaigns"],
     ...errorResponses,
   },

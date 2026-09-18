@@ -342,3 +342,59 @@ export const ChangeCampaignViewSchema = ChangeCampaignRecordSchema.extend({
   requirements: RequirementRollupSchema,
 });
 export type ChangeCampaignView = z.infer<typeof ChangeCampaignViewSchema>;
+
+// ── WHAT A LIST ROW IS (DEFAUL-36) ───────────────────────────────────────────────────────────────────
+//
+// A ROW IS A SUMMARY. The list used to return the whole `ChangeCampaignView` per campaign, rounds included —
+// every hypothesis, every change set, every gate run's metrics, every per-criterion answer with its detail
+// prose, and every `learned`. Measured on 2026-09-18: nine campaigns, 85,793 characters over 1,905 lines,
+// which exceeded the caller's output limit and had to be spilled to a file and read back with a script. That
+// is the read that answers "what has this workspace been changing", so it is the one that must fit.
+//
+// `list_issues` has carried the lesson in its own description for as long as it has existed — "rows are
+// SUMMARIES; the description, the full links and the move history live on get_issue" — and three sibling
+// reads never learned it. This is one of them.
+//
+// ⚠️ A PROJECTION SAYS HOW MUCH IT WITHHELD. `rounds` becomes a count plus the latest round's verdict, not
+// an omitted field: a campaign with four rejected attempts and one with none must not render alike, and the
+// latest round IS the current standing (every round answers every criterion, so the newest answer set is a
+// complete picture rather than a delta). Same law the knowledge assembly's `bodyChars` follows.
+export const ChangeRoundDigestSchema = z.object({
+  seq: z.number().int().min(1),
+  outcome: z.enum(["adopted", "rejected"]),
+  at: z.string(),
+  by: z.string().min(1),
+  // Who did the WORK, when it was not the agent that judged it. One string on a row, because "which of these
+  // attempts were delegated" is a question a supervisor asks of the list, not of one campaign.
+  delegationRunId: z.string().optional(),
+});
+export type ChangeRoundDigest = z.infer<typeof ChangeRoundDigestSchema>;
+
+export const ChangeCampaignSummarySchema = ChangeCampaignRecordSchema.omit({
+  rounds: true,
+  criteria: true,
+}).extend({
+  // The account the request is owed — derived, small, and the whole reason a row is still worth reading.
+  requirements: RequirementRollupSchema,
+  // How many criteria were declared. The statements themselves are behind `get_change_campaign`.
+  criteriaCount: z.number().int().min(0),
+  rounds: z.object({
+    total: z.number().int().min(0),
+    // Absent means "opened, not attempted" — which is the truthful reading of a campaign with no rounds, and
+    // is why this is optional rather than a zeroed object that reads like a round nobody judged.
+    latest: ChangeRoundDigestSchema.optional(),
+  }),
+});
+export type ChangeCampaignSummary = z.infer<typeof ChangeCampaignSummarySchema>;
+
+// ── AND THE PAGE SAYS IT IS A PAGE ───────────────────────────────────────────────────────────────────
+//
+// `available` is how many there were, against how many came back. Without it a caller served 200 of 600
+// cannot tell that from being served everything there was — a bounded read reporting "there is no more" when
+// it means "I stopped" (rule `protocol` L2). The web was already compensating by inferring truncation from a
+// full page (`rows.length >= WINDOW`), which is the caller rebuilding a fact the answer should have carried.
+export const ChangeCampaignPageSchema = z.object({
+  items: z.array(ChangeCampaignSummarySchema),
+  available: z.number().int().min(0),
+});
+export type ChangeCampaignPage = z.infer<typeof ChangeCampaignPageSchema>;

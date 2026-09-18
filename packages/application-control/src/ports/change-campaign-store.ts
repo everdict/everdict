@@ -7,6 +7,10 @@ export interface ChangeCampaignStore {
   create(record: ChangeCampaignRecord): Promise<void>;
   get(tenant: string, id: string): Promise<ChangeCampaignRecord | undefined>;
   list(tenant: string, options?: { issueId?: string; limit?: number }): Promise<ChangeCampaignRecord[]>;
+  // How many there ARE under the same filter, ignoring the page. Separate from `list` because the answer a
+  // bounded read owes its caller — "you were served N of M" — cannot be derived from the page it returned:
+  // a full page and a corpus that happens to be exactly that size are the same array (rule `protocol` L2).
+  count(tenant: string, options?: { issueId?: string }): Promise<number>;
   // `expectedRounds` is the guard, not a hint: the append lands only if the campaign still has that many
   // rounds. A concurrent logger LOSES (false) instead of overwriting, and `seq` stays contiguous by
   // construction rather than by everyone remembering to check. The caller must consume the boolean — a CAS

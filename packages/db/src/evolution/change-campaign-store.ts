@@ -32,6 +32,12 @@ export class InMemoryChangeCampaignStore implements ChangeCampaignStore {
       .slice(0, options?.limit ?? 200);
   }
 
+  async count(tenant: string, options?: { issueId?: string }): Promise<number> {
+    return [...this.byId.values()].filter(
+      (r) => r.tenant === tenant && (options?.issueId === undefined || r.issueId === options.issueId),
+    ).length;
+  }
+
   async appendRound(
     tenant: string,
     id: string,
@@ -103,6 +109,18 @@ export class PgChangeCampaignStore implements ChangeCampaignStore {
       [tenant, options?.issueId ?? null, options?.limit ?? 200],
     );
     return rows.map(parse);
+  }
+
+  // The same WHERE as `list`, without the page. Counted in the database rather than by reading the rows: the
+  // point of the projection is that this read never materializes 1,905 lines of round bodies again.
+  async count(tenant: string, options?: { issueId?: string }): Promise<number> {
+    const { rows } = await this.sql.query<{ count: string | number }>(
+      `SELECT count(*) AS count FROM everdict_change_campaigns
+        WHERE tenant = $1 AND ($2::text IS NULL OR issue_id = $2)`,
+      [tenant, options?.issueId ?? null],
+    );
+    const row = rows[0];
+    return row === undefined ? 0 : Number(row.count);
   }
 
   // The guard lives in the WHERE clause, not in a read-then-write: `round_count = $3` is the compare, the

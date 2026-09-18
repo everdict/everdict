@@ -9,7 +9,7 @@ import {
   ProjectStatusControl,
   ProjectUpdatePanel,
 } from '@/features/manage-project'
-import { changeCampaignSchema, type ChangeCampaign } from '@/entities/change-campaign'
+import { changeCampaignSummarySchema, type ChangeCampaignRow } from '@/entities/change-campaign'
 import { initiativeHref, initiativesSchema, type Initiative } from '@/entities/initiative'
 import {
   ISSUE_STATUSES,
@@ -57,7 +57,7 @@ const ATTEMPT_WINDOW = 200
 // What the board knows about attempts. A union rather than a flag beside a list: a caller cannot read the
 // items and forget to ask whether they are the answer.
 type AttemptRead =
-  | { kind: 'read'; items: ChangeCampaign[]; unparsed: number; truncated: boolean }
+  | { kind: 'read'; items: ChangeCampaignRow[]; unparsed: number; truncated: boolean }
   | { kind: 'unknown'; reason: string }
 
 function BackLink({ workspace, label }: { workspace: string; label: string }) {
@@ -143,18 +143,25 @@ export default async function ProjectDetailPage({
     controlPlane
       .listChangeCampaigns(ctx, { limit: ATTEMPT_WINDOW })
       .then((raw): AttemptRead => {
-        const rows = z.array(z.unknown()).parse(raw)
-        const items: ChangeCampaign[] = []
+        // The rows are SUMMARIES now (DEFAUL-36) — the rounds' bodies live on the campaign page, and this
+        // screen never needed them: it counts attempts and shows where the newest one ended.
+        const page = z.object({ items: z.array(z.unknown()), available: z.number() }).parse(raw)
+        const items: ChangeCampaignRow[] = []
         let unparsed = 0
-        for (const row of rows) {
-          const parsed = changeCampaignSchema.safeParse(row)
+        for (const row of page.items) {
+          const parsed = changeCampaignSummarySchema.safeParse(row)
           if (parsed.success) items.push(parsed.data)
           else unparsed += 1
         }
-        // The window is the whole workspace's newest campaigns, so a full page means there may be more that
-        // belong to THIS project and were never fetched. Saying so is the difference between "no attempts"
-        // and "no attempts in what we read".
-        return { kind: 'read', items, unparsed, truncated: rows.length >= ATTEMPT_WINDOW }
+        // …and truncation is now REPORTED rather than inferred. `rows.length >= WINDOW` was the caller
+        // rebuilding a fact the answer should have carried, and it got it wrong in exactly one case: a
+        // workspace with exactly one window's worth of campaigns was drawn as though there were more.
+        return {
+          kind: 'read',
+          items,
+          unparsed,
+          truncated: page.available > page.items.length,
+        }
       })
       .catch(
         (e): AttemptRead => ({
@@ -167,7 +174,7 @@ export default async function ProjectDetailPage({
   // issueId → the attempts against it, newest first (the list comes back in created-desc order). The key is
   // the issue's ID on both sides: the control plane resolves an `EVD-12`-style ref to the id before it files
   // a campaign, so there is one spelling here rather than two to try.
-  const attemptsByIssue = new Map<string, ChangeCampaign[]>()
+  const attemptsByIssue = new Map<string, ChangeCampaignRow[]>()
   if (attempts.kind === 'read')
     for (const campaign of attempts.items) {
       const bucket = attemptsByIssue.get(campaign.issueId)

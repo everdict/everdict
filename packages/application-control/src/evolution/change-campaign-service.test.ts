@@ -30,6 +30,12 @@ class FakeChangeCampaignStore implements ChangeCampaignStore {
       .filter((r) => r.tenant === tenant && (options?.issueId === undefined || r.issueId === options.issueId))
       .slice(0, options?.limit ?? 200);
   }
+  async count(tenant: string, options?: { issueId?: string }): Promise<number> {
+    return [...this.byId.values()].filter(
+      (r) => r.tenant === tenant && (options?.issueId === undefined || r.issueId === options.issueId),
+    ).length;
+  }
+
   async appendRound(
     tenant: string,
     id: string,
