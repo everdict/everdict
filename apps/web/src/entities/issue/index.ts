@@ -71,6 +71,7 @@ export {
   type IssueViewParams,
 } from './model/view'
 export { issueChainSchema, type IssueChain } from './model/schema'
+export { ISSUE_CHAIN_STATES } from './model/view'
 export { issueHref, issueSlug } from './lib/href'
 export { issueAttachmentProxy } from './lib/attachment-proxy'
 export {

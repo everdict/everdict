@@ -5221,7 +5221,8 @@
       "status": "상태",
       "assignee": "담당자",
       "priority": "우선순위",
-      "project": "프로젝트"
+      "project": "프로젝트",
+      "chain": "체인"
     },
     "orderBy": {
       "updated": "최근 수정순",
@@ -5240,7 +5241,8 @@
       "status": "상태 없음",
       "priority": "우선순위 없음",
       "assignee": "담당자 없음",
-      "project": "프로젝트 없음"
+      "project": "프로젝트 없음",
+      "chain": "체인 밖"
     },
     "fieldMentionedBy": "언급한 이슈",
     "fieldChain": "체인"

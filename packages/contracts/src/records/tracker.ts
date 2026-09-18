@@ -570,7 +570,11 @@ export type IssueOrder = z.infer<typeof IssueOrderSchema>;
 // The columns a list can be grouped by — each a SCALAR on the issue, so every row belongs to exactly one group
 // and the count is a plain GROUP BY. Labels are deliberately absent: an issue carries several, so grouping by
 // label would put one row in several groups and the group counts would add up to more than the list.
-export const ISSUE_GROUP_BYS = ["status", "assignee", "priority", "project"] as const;
+// ⚠️ `chain` IS HERE BECAUSE THE INVARIANT OWES A COUNT (DEFAUL-39 §5). The tracker has two populations —
+// requests in the work chain and requests born before it existed — and "the invariant is ON" and "the
+// invariant COVERS anything" are different facts. Grouping by it is how the second one gets an answer, and
+// the chainless bucket is the existing UNSET group, which is exactly its meaning: nobody has said.
+export const ISSUE_GROUP_BYS = ["status", "assignee", "priority", "project", "chain"] as const;
 export const IssueGroupBySchema = z.enum(ISSUE_GROUP_BYS);
 export type IssueGroupBy = z.infer<typeof IssueGroupBySchema>;
 

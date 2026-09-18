@@ -1,7 +1,7 @@
 import type { IssueChain, IssueRecord } from "@everdict/contracts";
 import { ConflictError } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { Issue } from "./issue.js";
+import { Issue, issueCountsByGroup } from "./issue.js";
 
 // ── DEFAUL-39 S1: THE CHAIN REFUSES (docs/specs/work-chain-invariants-spec.md §2) ────────────────────
 //
@@ -241,5 +241,27 @@ describe("the work chain refuses (DEFAUL-39 S1)", () => {
         issue.link({ type: "harness", id: "web-agent", committedAt: "2026-09-18T13:00:00.000Z" }, "dana", LATER),
       ).toThrow(/`committedAt` belongs to commit links only/);
     });
+  });
+  // ── THE COUNT THE INVARIANT OWES (spec §5) ────────────────────────────────────────────────────────
+  //
+  // "The invariant is ON" and "the invariant COVERS anything" are different facts, and a gate over an empty
+  // corpus reads exactly like coverage (CLAUDE.md names this by name). Grouping by `chain` is how the second
+  // one gets an answer, and the chainless bucket is the UNSET group — which is its meaning, not a `draft`.
+  it("counts the two populations apart — chained by state, and chainless as the unset bucket", () => {
+    const records = [
+      newIssue({ state: "accepted", at: NOW, by: "d", design: { kind: "declined", why: "s" } }),
+      newIssue({ state: "accepted", at: NOW, by: "d", design: { kind: "spec", path: "docs/specs/x.md" } }),
+      newIssue({ state: "draft" }),
+      newIssue(), // born before the chain existed
+      newIssue(),
+    ];
+
+    const counts = issueCountsByGroup(records, "chain");
+
+    expect(counts).toContainEqual({ key: "accepted", count: 2 });
+    expect(counts).toContainEqual({ key: "draft", count: 1 });
+    // ⚠️ `null`, not "draft". An issue that predates the chain has not been left in draft — nobody has asked.
+    expect(counts).toContainEqual({ key: null, count: 2 });
+    expect(counts.some((c) => c.key === "shipped")).toBe(false);
   });
 });

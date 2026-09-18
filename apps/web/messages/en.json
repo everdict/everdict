@@ -5221,7 +5221,8 @@
       "status": "Status",
       "assignee": "Assignee",
       "priority": "Priority",
-      "project": "Project"
+      "project": "Project",
+      "chain": "Chain"
     },
     "orderBy": {
       "updated": "Last updated",
@@ -5240,7 +5241,8 @@
       "status": "No status",
       "priority": "No priority",
       "assignee": "Unassigned",
-      "project": "No project"
+      "project": "No project",
+      "chain": "Not in the chain"
     },
     "fieldMentionedBy": "Mentioned by",
     "fieldChain": "Chain"

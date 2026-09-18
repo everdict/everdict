@@ -21,7 +21,7 @@ import { ISSUE_PRIORITIES, ISSUE_STATUSES, type IssuePriority, type IssueStatus 
 
 // The grouping key. All of them are SCALAR fields of an issue, so one issue belongs to exactly one group — labels are excluded for the
 // same reason as in the control plane (one issue carries several labels, so the groups would sum to more than the list).
-export const ISSUE_GROUP_BYS = ['status', 'assignee', 'priority', 'project'] as const
+export const ISSUE_GROUP_BYS = ['status', 'assignee', 'priority', 'project', 'chain'] as const
 export const issueGroupBySchema = z.enum(ISSUE_GROUP_BYS)
 export type IssueGroupBy = WireIssueGroupBy
 
@@ -184,6 +184,11 @@ const STATUS_BOARD_ORDER: IssueStatus[] = [
   'cancelled',
 ]
 
+// The chain in the order it runs, so a grouped list reads left to right as the request moves. The unset
+// bucket is NOT in here — it sorts last like every other "nobody has said", and it means something different
+// from `draft`: born before the chain existed (DEFAUL-39 §5).
+export const ISSUE_CHAIN_STATES = ['draft', 'accepted', 'rejected', 'shipped'] as const
+
 export function orderIssueGroups(
   groups: readonly IssueGroupCount[],
   groupBy: IssueGroupBy
@@ -193,7 +198,9 @@ export function orderIssueGroups(
       ? STATUS_BOARD_ORDER
       : groupBy === 'priority'
         ? ISSUE_PRIORITIES
-        : undefined
+        : groupBy === 'chain'
+          ? ISSUE_CHAIN_STATES
+          : undefined
   if (vocabulary === undefined) return [...groups]
   return [...groups].sort((a, b) => {
     if (a.key === null) return b.key === null ? 0 : 1
@@ -224,6 +231,17 @@ export function issueGroupsToRender(
     return ISSUE_PRIORITIES.filter(
       (priority) => view.filters.priority?.includes(priority) ?? true
     ).map((priority) => ({ key: priority, count: seen.get(priority) ?? 0 }))
+  }
+  // ⚠️ THE CHAIN STANDS ITS COLUMNS INCLUDING THE EMPTY ONES, AND INCLUDING THE UNSET ONE (DEFAUL-39 §5).
+  // This axis exists to answer "how much of this tracker is under the invariant at all", and falling through
+  // to "only the groups the control plane counted" would draw a workspace with nothing in the chain as a
+  // screen with nothing to see — which reads exactly like coverage. The unset column is the whole point: it
+  // is the requests born before the chain existed, and they are not drafts.
+  if (groupBy === 'chain') {
+    return [
+      ...ISSUE_CHAIN_STATES.map((state) => ({ key: state, count: seen.get(state) ?? 0 })),
+      { key: null, count: seen.get(null) ?? 0 },
+    ]
   }
   // The remaining axes have an OPEN vocabulary — standing a column for every workspace member fills the screen with empty slots for
   // people who never received an issue. Only the groups the control plane counted, in the order it counted them (largest first).

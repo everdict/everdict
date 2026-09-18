@@ -4,6 +4,7 @@ import { UserRound } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import {
+  ISSUE_CHAIN_STATES,
   ISSUE_PRIORITIES,
   ISSUE_STATUSES,
   IssuePriorityIcon,
@@ -29,6 +30,7 @@ export function IssueGroupLabel({
 }) {
   const t = useTranslations('issuesPage')
   const tracker = useTranslations('tracker')
+  const chain = useTranslations('issueChain')
 
   if (groupKey === null)
     return (
@@ -59,6 +61,14 @@ export function IssueGroupLabel({
         <span className="truncate">{tracker(`issuePriority.${priority}`)}</span>
       </span>
     )
+  }
+
+  if (groupBy === 'chain') {
+    // A closed vocabulary, narrowed like status and priority: using the server's string as a catalog key
+    // eventually puts a missing key on screen.
+    const state = ISSUE_CHAIN_STATES.find((c) => c === groupKey)
+    if (state === undefined) return <span className="truncate">{groupKey}</span>
+    return <span className="truncate">{chain(`state.${state}`)}</span>
   }
 
   if (groupBy === 'assignee') {

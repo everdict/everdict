@@ -200,6 +200,10 @@ export function issueGroupKey(record: IssueRecord, groupBy: IssueGroupBy): strin
       return record.assignee ?? null;
     case "project":
       return record.projectId ?? null;
+    // Absent is the UNSET bucket, not a `draft` group — an issue born before the chain has not been left in
+    // draft, it has never been asked (§5). The null key is what the list already draws as "nobody has said".
+    case "chain":
+      return record.chain?.state ?? null;
   }
 }
 

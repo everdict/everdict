@@ -37,6 +37,9 @@ const GROUP_COLUMN: Record<IssueGroupBy, string> = {
   priority: "priority",
   assignee: "assignee",
   project: "project_id",
+  // The jsonb state, extracted the same way the partial index in migration 0221 does — so the GROUP BY and the
+  // index agree on what the key is rather than each computing its own.
+  chain: "chain->>'state'",
 };
 
 function clampLimit(limit: number | undefined): number {
