@@ -364,6 +364,12 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
         version: z.string().optional(),
         dataset: z.string().optional().describe("case links only — the dataset the case id lives in"),
         repository: z.string().optional().describe('commit links only — "owner/name", the repo the sha lives in'),
+        committedAt: z
+          .string()
+          .optional()
+          .describe(
+            "commit links only — the commit's AUTHOR DATE (ISO). REQUIRED once the request is in the work chain: it is what witnesses that the decision came before the diff, and `addedAt` cannot do it (that is when you made the link). A commit authored before the acceptance is REFUSED.",
+          ),
         host: z.string().optional().describe("commit links only — GitHub Enterprise host; omit for github.com"),
         note: z.string().max(500).optional(),
       },
@@ -381,6 +387,7 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
               ...(a.dataset !== undefined ? { dataset: a.dataset } : {}),
               ...(a.repository !== undefined ? { repository: a.repository } : {}),
               ...(a.host !== undefined ? { host: a.host } : {}),
+              ...(a.committedAt !== undefined ? { committedAt: a.committedAt } : {}),
               ...(a.note !== undefined ? { note: a.note } : {}),
             },
             actor,

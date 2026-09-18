@@ -168,4 +168,78 @@ describe("the work chain refuses (DEFAUL-39 S1)", () => {
     expect(moved.patch.status).toBe("in_progress");
     expect(moved.patch.chain).toBeUndefined();
   });
+  // ── S2: A COMMIT CANNOT CLAIM A REQUEST THAT WAS ACCEPTED AFTER IT (spec §3) ──────────────────────
+  //
+  // Git could refuse back-dating, which is why the file-era chain worked: "a plan written after the diff is
+  // not a plan, it is a description that agrees with itself". The witness here is the commit's AUTHOR DATE —
+  // ⚠️ NOT `addedAt`, which is when somebody made the link and is trivially after the acceptance. The issue
+  // assumed `addedAt` was the witness; reading the schema before implementing is what caught that.
+  describe("the order witness", () => {
+    const accepted = (at: string) =>
+      newIssue({ state: "accepted", at, by: "dana", design: { kind: "declined", why: "small" } });
+    const commit = (over: Record<string, unknown> = {}) => ({
+      type: "commit" as const,
+      id: "abc1234",
+      repository: "acme/widget",
+      ...over,
+    });
+
+    it("refuses a commit authored BEFORE the acceptance, naming both times", () => {
+      const record = accepted("2026-09-18T12:00:00.000Z");
+      const issue = Issue.from(record);
+
+      expect(() => issue.link(commit({ committedAt: "2026-09-18T11:00:00.000Z" }), "dana", LATER)).toThrow(
+        /before the request was accepted at 2026-09-18T12:00:00.000Z/,
+      );
+      // …and the world is read back: a refusal that still linked is not a refusal.
+      expect(record.links).toEqual([]);
+    });
+
+    it("accepts a commit authored after it", () => {
+      const issue = Issue.from(accepted("2026-09-18T12:00:00.000Z"));
+      const { patch } = issue.link(commit({ committedAt: "2026-09-18T13:00:00.000Z" }), "dana", LATER);
+      expect(patch.links?.[0]).toMatchObject({
+        type: "commit",
+        id: "abc1234",
+        committedAt: "2026-09-18T13:00:00.000Z",
+      });
+    });
+
+    it("refuses a commit link with no author date on a request in the chain — an unwitnessed claim", () => {
+      const issue = Issue.from(accepted("2026-09-18T12:00:00.000Z"));
+      expect(() => issue.link(commit(), "dana", LATER)).toThrow(/names the commit's author date/);
+    });
+
+    it("refuses code claiming a request nobody accepted", () => {
+      for (const chain of [{ state: "draft" as const }, { state: "rejected" as const, at: NOW, by: "d", reason: "no" }])
+        expect(() =>
+          Issue.from(newIssue(chain)).link(commit({ committedAt: "2026-09-18T13:00:00.000Z" }), "dana", LATER),
+        ).toThrow(/code cannot claim a request nobody accepted/);
+    });
+
+    // ⚠️ SCOPED TO ISSUES THAT HAVE A CHAIN. Absent is "born before the chain existed" (spec §5), and refusing
+    // those would turn the invariant into a migration nobody ran — every legacy issue would stop taking links.
+    it("leaves a chainless issue's commit links exactly as they were", () => {
+      const issue = Issue.from(newIssue());
+      const { patch } = issue.link(commit(), "dana", LATER);
+      expect(patch.links?.[0]).toMatchObject({ type: "commit", id: "abc1234" });
+      expect(patch.links?.[0]).not.toHaveProperty("committedAt");
+    });
+
+    // A date that never parses compares as `false` forever, which would admit every commit while looking like
+    // a check (protocol L2: a guard that cannot fail is not a guard). Refused at the coordinate rule instead.
+    it("refuses an author date that is not a date, rather than comparing it forever as false", () => {
+      const issue = Issue.from(accepted("2026-09-18T12:00:00.000Z"));
+      expect(() => issue.link(commit({ committedAt: "last tuesday" }), "dana", LATER)).toThrow(
+        /`committedAt` is the commit's author date as an ISO timestamp/,
+      );
+    });
+
+    it("refuses the coordinate on a link that is not a commit", () => {
+      const issue = Issue.from(accepted("2026-09-18T12:00:00.000Z"));
+      expect(() =>
+        issue.link({ type: "harness", id: "web-agent", committedAt: "2026-09-18T13:00:00.000Z" }, "dana", LATER),
+      ).toThrow(/`committedAt` belongs to commit links only/);
+    });
+  });
 });

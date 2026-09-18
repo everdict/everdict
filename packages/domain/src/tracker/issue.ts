@@ -44,6 +44,7 @@ export interface NewIssueLinkInput {
   dataset?: string; // `case` links only — the dataset the case id lives in (`issueLinkDefects`)
   repository?: string; // `commit` links only — "owner/name", the repository the sha lives in
   host?: string; // `commit` links only — unset for github.com, else the Enterprise host
+  committedAt?: string; // `commit` links only — the commit's AUTHOR DATE, the order witness (DEFAUL-39 §3)
   note?: string;
 }
 
@@ -702,6 +703,38 @@ export class Issue {
         { issue: this.record.id, type: input.type, id: input.id },
         defects.join("; "),
       );
+    // ── THE ORDER WITNESS (DEFAUL-39 §3.2) ──────────────────────────────────────────────────────────
+    //
+    // A commit cannot claim a request that was accepted after it. Three refusals, each NAMED, because
+    // "nobody accepted this", "you linked it to the wrong request" and "this commit predates the decision"
+    // are different next actions and a bare 400 makes an operator guess.
+    //
+    // ⚠️ SCOPED TO ISSUES THAT HAVE A CHAIN. A link on a chainless issue stays legal: absent is "born before
+    // the chain existed", and refusing those would make the invariant a migration nobody ran (spec §5).
+    if (input.type === "commit" && this.record.chain !== undefined) {
+      const chain = this.record.chain;
+      if (chain.state === "draft" || chain.state === "rejected")
+        throw new ConflictError(
+          "CONFLICT",
+          { issue: this.record.id, chain: chain.state },
+          `This request is ${chain.state} — code cannot claim a request nobody accepted. Accept it first, and the acceptance will be dated before this link rather than after it.`,
+        );
+      if (input.committedAt === undefined)
+        throw new BadRequestError(
+          "BAD_REQUEST",
+          { issue: this.record.id, id: input.id },
+          "A commit link on a request in the chain names the commit's author date (`committedAt`) — without it nothing witnesses that the decision came first, and `addedAt` cannot: it is when you made the link.",
+        );
+      // `accepted.at` for an accepted request; a shipped one keeps the acceptance that led to it in its
+      // history, and comparing against the SHIP time would admit a commit written between the two.
+      const acceptedAt = chain.state === "accepted" ? chain.at : undefined;
+      if (acceptedAt !== undefined && Date.parse(input.committedAt) < Date.parse(acceptedAt))
+        throw new ConflictError(
+          "CONFLICT",
+          { issue: this.record.id, committedAt: input.committedAt, acceptedAt },
+          `This commit was authored at ${input.committedAt}, before the request was accepted at ${acceptedAt} — a decision that followed the diff is a description that agrees with itself, not a decision.`,
+        );
+    }
     // The identity is the WHOLE coordinate — two datasets can both hold a case called `c1`, and two
     // repositories can both hold a sha with the same abbreviation. `sameIssueLink` owns that comparison, and
     // `unlink` asks it the same question, so what refuses a duplicate and what matches a removal cannot drift.
@@ -719,6 +752,7 @@ export class Issue {
       ...(input.dataset !== undefined ? { dataset: input.dataset } : {}),
       ...(input.repository !== undefined ? { repository: input.repository } : {}),
       ...(input.host !== undefined ? { host: input.host } : {}),
+      ...(input.committedAt !== undefined ? { committedAt: input.committedAt } : {}),
       ...(input.note !== undefined ? { note: input.note } : {}),
       addedBy: by,
       addedAt: now,

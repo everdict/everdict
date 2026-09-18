@@ -147,6 +147,17 @@ export const IssueLinkSchema = z.object({
   // Unset = github.com; set = the GitHub Enterprise host. Without it a GHE workspace's commit link would
   // render an address on github.com — a link to SOMEBODY ELSE'S repository, which is worse than no link.
   host: z.string().min(1).max(200).optional(),
+  // ── THE ORDER WITNESS (DEFAUL-39 §3, commit links only) ──────────────────────────────────────────
+  //
+  // The commit's own AUTHOR DATE. ⚠️ `addedAt` below is not this and cannot be: it is when somebody made the
+  // link, which is trivially after the acceptance and therefore proves nothing about which came first. Git
+  // could refuse back-dating, which is why the file-era chain worked — "a plan written after the diff is not
+  // a plan, it is a description that agrees with itself" — and this is the coordinate that carries the same
+  // question here.
+  //
+  // Optional on the SCHEMA because every commit link written before this has none; required by
+  // `issueLinkDefects` for a commit link on an issue that HAS a chain (a legacy issue keeps linking).
+  committedAt: z.string().min(1).optional(),
   note: z.string().max(500).optional(),
   addedBy: z.string(),
   addedAt: z.string(),
@@ -173,6 +184,7 @@ export function issueLinkDefects(link: {
   version?: string;
   repository?: string;
   host?: string;
+  committedAt?: string;
 }): string[] {
   const defects: string[] = [];
   if (link.type === "case") {
@@ -196,10 +208,17 @@ export function issueLinkDefects(link: {
     if (link.id !== undefined && !COMMIT_SHA.test(normaliseIssueLinkId("commit", link.id)))
       defects.push("a commit link's id is the sha — hex, 7 to 64 characters");
     if (link.version !== undefined) defects.push("a commit link carries no `version` — the sha IS the version");
+    // An author date that is not a date is not a witness. Parsed rather than pattern-matched, because what
+    // the guard COMPARES is a time and a string that never becomes one would compare as `false` forever —
+    // silently admitting every commit (protocol L2: a check that cannot fail is not a check).
+    if (link.committedAt !== undefined && Number.isNaN(Date.parse(link.committedAt)))
+      defects.push(`\`committedAt\` is the commit's author date as an ISO timestamp (got "${link.committedAt}")`);
   } else {
     if (link.repository !== undefined)
       defects.push(`\`repository\` belongs to commit links only (this link is a ${link.type})`);
     if (link.host !== undefined) defects.push(`\`host\` belongs to commit links only (this link is a ${link.type})`);
+    if (link.committedAt !== undefined)
+      defects.push(`\`committedAt\` belongs to commit links only (this link is a ${link.type})`);
   }
   return defects;
 }

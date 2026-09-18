@@ -16,6 +16,9 @@ export const IssueLinkInputSchema = z
     // ask every future caller which one is the real one.
     repository: z.string().min(1).max(200).optional(),
     host: z.string().min(1).max(200).optional(),
+    // `commit` links only: the commit's AUTHOR DATE — the order witness (DEFAUL-39 §3). Required by the
+    // transition once the request is in the work chain; the door only checks it belongs to a commit link.
+    committedAt: z.string().min(1).max(64).optional(),
     note: z.string().max(500).optional(),
   })
   // The coordinates rule at the door (the domain transition enforces it again — one owner, `issueLinkDefects`).
