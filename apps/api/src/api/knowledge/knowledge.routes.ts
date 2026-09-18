@@ -56,7 +56,15 @@ export function registerKnowledgeRoutes(app: FastifyInstance, deps: ServerDeps):
       return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(parsed.error).join("; ") });
     try {
       return reply.send(
-        await deps.knowledgeService.assembleContext(principal.workspace, principal.subject, parsed.data.refs),
+        // Same projection as the MCP surface, for the same measured reason: this read is agent-facing and its
+        // full-body form overflowed a caller at 20 entries. The body is one `GET /knowledge/entries/:id` away.
+        await deps.knowledgeService.assembleContext(
+          principal.workspace,
+          principal.subject,
+          parsed.data.refs,
+          undefined,
+          { body: "omit", ...(parsed.data.limit !== undefined ? { limit: parsed.data.limit } : {}) },
+        ),
       );
     } catch (err) {
       return sendError(reply, err);

@@ -118,7 +118,9 @@ describe("KnowledgeService.assembleContext", () => {
     // Three keys, not two: `receipt` joined the payload when the assembly began filing what it answered.
     // The key set stays pinned because this payload is a HOT one — it feeds every agent turn and every
     // plugin session, and a field that arrives unnoticed is a field nobody decided to pay for.
-    expect(Object.keys(ctx).sort()).toEqual(["knowledge", "receipt", "skills"]);
+    // `available` joined it on purpose (2026-09-18): a page that does not say what it is a page OF reads
+    // as the whole set. The pin is what made that addition a decision rather than a surprise.
+    expect(Object.keys(ctx).sort()).toEqual(["available", "knowledge", "receipt", "skills"]);
     expect(ctx.receipt).toEqual({ recorded: false, reason: "unconfigured" });
   });
 });
@@ -263,5 +265,70 @@ describe("KnowledgeService.recordUse", () => {
         outcome: "x",
       }),
     ).toEqual({ recorded: false, reason: "unconfigured" });
+  });
+});
+
+describe("KnowledgeService.assembleContext — bounded, and honest about it", () => {
+  // ── BOUNDED, AND HONEST ABOUT IT ──────────────────────────────────────────────────────────────────
+  //
+  // The measurement behind these: one anchor over 20 entries returned 76,617 characters and exceeded the
+  // caller's output limit, while the page cap was invisible in the response.
+
+  const many = (n: number) =>
+    Array.from({ length: n }, (_, i) =>
+      entry(`k-${String(i).padStart(3, "0")}`, [{ type: "repository", key: "acme/w" }]),
+    );
+
+  it("says how many there WERE, not just how many it sent", async () => {
+    const svc = new KnowledgeService({
+      skills: { list: async () => [] },
+      knowledgeEntries: { list: async () => many(37) },
+    });
+    const ctx = await svc.assembleContext("acme", "alice", [{ type: "repository", key: "acme/w" }]);
+    expect(ctx.knowledge).toHaveLength(20);
+    // The whole point: 20 of 37 must not read the same as 20 of 20.
+    expect(ctx.available).toEqual({ knowledge: 37, skills: 0 });
+  });
+
+  it("omits the body when asked and still says how big it was", async () => {
+    const svc = new KnowledgeService({
+      skills: { list: async () => [] },
+      knowledgeEntries: { list: async () => [entry("k-1", [{ type: "repository", key: "acme/w" }])] },
+    });
+    const projected = await svc.assembleContext("acme", "alice", [{ type: "repository", key: "acme/w" }], undefined, {
+      body: "omit",
+    });
+    expect(projected.knowledge[0]?.body).toBeUndefined();
+    // "a claim with 8k of detail you have not read" and "a claim that is one sentence" are different things
+    // to do next, and an absent body says neither.
+    expect(projected.knowledge[0]?.bodyChars).toBe("…".length);
+  });
+
+  it("KEEPS the body by default — the delegate's brief has no second call to make", async () => {
+    const svc = new KnowledgeService({
+      skills: { list: async () => [] },
+      knowledgeEntries: { list: async () => [entry("k-1", [{ type: "repository", key: "acme/w" }])] },
+    });
+    const ctx = await svc.assembleContext("acme", "alice", [{ type: "repository", key: "acme/w" }]);
+    // Defaulting to the projection would have silently undone `2f04fd8bd`: a delegate briefed with a title it
+    // cannot open is briefed with a rumour. Between two ways to be wrong, default to the loud one.
+    expect(ctx.knowledge[0]?.body).toBe("…");
+    expect(ctx.knowledge[0]?.bodyChars).toBe("…".length);
+  });
+
+  it("serves the limit the caller states, and REFUSES one outside the range", async () => {
+    const svc = new KnowledgeService({
+      skills: { list: async () => [] },
+      knowledgeEntries: { list: async () => many(37) },
+    });
+    const five = await svc.assembleContext("acme", "alice", [{ type: "repository", key: "acme/w" }], undefined, {
+      limit: 5,
+    });
+    expect(five.knowledge).toHaveLength(5);
+    expect(five.available.knowledge).toBe(37);
+
+    await expect(
+      svc.assembleContext("acme", "alice", [{ type: "repository", key: "acme/w" }], undefined, { limit: 1000 }),
+    ).rejects.toThrow(/limit must be an integer/);
   });
 });

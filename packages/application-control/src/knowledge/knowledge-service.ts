@@ -41,17 +41,51 @@ export interface TaskContextSkill {
 // (`covers | earlier | later | general`): the anchor's own version IS the as-of coordinate (pass an old scorecard's
 // harness@2.1.0 and the knowledge base is projected onto that point; an unversioned anchor projects onto the present).
 // See docs/architecture/workspace-knowledge.md §Task-context assembly.
+// ── WHAT AN ASSEMBLED ENTRY CARRIES ──────────────────────────────────────────────────────────────────
+//
+// One shape for both readings, because two types would let a caller hold a "full" entry whose body is absent.
+// `body` is present only when the caller asked for it; `bodyChars` is ALWAYS present, so a projection says how
+// much it withheld rather than looking like an entry that had nothing to say. The measurement that forced
+// this: one anchor over 20 entries returned 76,617 characters and exceeded the caller's output limit, and one
+// entry in that set is 8,238 characters on its own.
+export type TaskContextEntry = Omit<KnowledgeEntryRecord, "body"> & {
+  body?: string;
+  bodyChars: number;
+  coverage?: Coverage;
+  relation?: AnchorRelation;
+};
+
 export interface TaskContext {
-  knowledge: (KnowledgeEntryRecord & { coverage?: Coverage; relation?: AnchorRelation })[];
+  knowledge: TaskContextEntry[];
   skills: TaskContextSkill[];
+  // HOW MANY THERE WERE, against how many came back. The service already computed these and passed them only
+  // to the receipt writer, so a caller served 20 of 200 could not tell that from being served everything —
+  // which is a bounded read reporting "there is no more" when it means "I stopped" (rule `protocol` L2).
+  // It matters most HERE, because `recordUse` measures the citation rate and a rate over a silently truncated
+  // page is computed on the wrong denominator.
+  available: { knowledge: number; skills: number };
   // WHETHER WHAT WAS RETURNED WAS RECORDED. Not optional: a caller that never sees the outcome cannot tell a
   // deployment that files receipts from one that silently does not, and every measurement over the receipt
   // series would then be computed on a corpus with invisible holes (rule `protocol` L2).
   receipt: RetrievalReceiptOutcome;
 }
 
-// The most entries and the most skill candidates one context carries.
+// The most entries and the most skill candidates one context carries, when the caller states no limit.
 const CONTEXT_PAGE = 20;
+// The ceiling a caller may raise it to. A request above this is REFUSED rather than clamped: silently serving
+// 100 to someone who asked for 1000 answers a question they did not ask.
+const CONTEXT_MAX_PAGE = 100;
+
+export interface AssembleContextOptions {
+  // `include` (the DEFAULT) keeps every entry's body. The default is deliberate and not the cheaper one: the
+  // delegation brief assembles a delegate's inherited knowledge through this service, and its body travels on
+  // purpose — "a delegate has no channel here, so a title it cannot open is a rumour rather than a pointer".
+  // A caller that is not updated therefore keeps today's behaviour, which is loud (an oversized response)
+  // rather than silent (a delegate briefed with titles it cannot open). Between two ways to be wrong, default
+  // to the one that announces itself.
+  body?: "include" | "omit";
+  limit?: number;
+}
 
 // The control-plane service behind task-time context assembly — the consumption surface of the workspace's knowledge.
 // Both transports (POST /knowledge/context + MCP get_task_context) call this one service.
@@ -80,7 +114,10 @@ export class KnowledgeService {
     subject: string,
     anchors: NodeRef[],
     observer?: { sessionId?: string },
+    options?: AssembleContextOptions,
   ): Promise<TaskContext> {
+    const page = resolveContextLimit(options?.limit);
+    const withBody = (options?.body ?? "include") === "include";
     const { skills: skillStore, knowledgeEntries, latestVersionOf } = this.deps;
     const now = new Date().toISOString();
 
@@ -124,7 +161,7 @@ export class KnowledgeService {
       if (a.entry.status !== b.entry.status) return a.entry.status === "active" ? -1 : 1;
       return baseline(b.entry).localeCompare(baseline(a.entry));
     });
-    const entryPage = entriesWithRelation.slice(0, CONTEXT_PAGE);
+    const entryPage = entriesWithRelation.slice(0, page);
     const entryCoverage = latestVersionOf
       ? await resolveCoverage(
           tenant,
@@ -135,8 +172,13 @@ export class KnowledgeService {
       : undefined;
     const knowledge: TaskContext["knowledge"] = entryPage.map(({ entry, relation }, i) => {
       const c = entryCoverage?.[i];
+      const { body, ...rest } = entry;
       return {
-        ...entry,
+        ...rest,
+        // The size travels even when the text does not: "this claim is 8k of detail you have not read" and
+        // "this claim is a sentence" are different things to do next, and an absent body says neither.
+        bodyChars: body.length,
+        ...(withBody ? { body } : {}),
         ...(relation !== undefined ? { relation } : {}),
         ...(c !== undefined ? { coverage: c } : {}),
       };
@@ -145,7 +187,7 @@ export class KnowledgeService {
     const matchedSkills = (await skillStore.list(tenant, subject)).filter((s) => matches(s.refs));
     const skillsWithRelation = matchedSkills.map((s) => ({ record: s, relation: relationFor(s.refs) }));
     skillsWithRelation.sort((a, b) => tier(a.relation) - tier(b.relation));
-    const skillPage = skillsWithRelation.slice(0, CONTEXT_PAGE);
+    const skillPage = skillsWithRelation.slice(0, page);
     const skillCoverage = latestVersionOf
       ? await resolveCoverage(
           tenant,
@@ -173,7 +215,12 @@ export class KnowledgeService {
       skillsAvailable: skillsWithRelation.length,
       at: now,
     });
-    return { knowledge, skills, receipt };
+    return {
+      knowledge,
+      skills,
+      available: { knowledge: entriesWithRelation.length, skills: skillsWithRelation.length },
+      receipt,
+    };
   }
 
   // ── THE SESSION'S ACCOUNT ──────────────────────────────────────────────────────────────────────────
@@ -262,4 +309,18 @@ export class KnowledgeService {
       },
     });
   }
+}
+
+// A limit the caller did not state is the page this service has always served. One outside the range is
+// REFUSED rather than clamped, for the same reason the lineage walk refuses an out-of-range depth: a silently
+// adjusted answer is an answer to a question nobody asked.
+function resolveContextLimit(requested: number | undefined): number {
+  if (requested === undefined) return CONTEXT_PAGE;
+  if (!Number.isInteger(requested) || requested < 1 || requested > CONTEXT_MAX_PAGE)
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      { limit: requested, max: CONTEXT_MAX_PAGE },
+      `limit must be an integer between 1 and ${CONTEXT_MAX_PAGE} — the default is ${CONTEXT_PAGE}, and \`available\` tells you how many there were`,
+    );
+  return requested;
 }

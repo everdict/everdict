@@ -156,18 +156,34 @@ describe("knowledge entries — reified claims", () => {
     });
     expect(res.statusCode).toBe(200);
     const ctx = res.json() as {
-      knowledge: Array<{ title: string; relation?: string; coverage?: { state: string } }>;
+      knowledge: Array<{
+        title: string;
+        body?: string;
+        bodyChars: number;
+        relation?: string;
+        coverage?: { state: string };
+      }>;
       skills: Array<{ id: string; relation?: string }>;
       receipt: { recorded: boolean; reason?: string };
+      available: { knowledge: number; skills: number };
     };
     // Three keys since the assembly began filing what it answered, and the outcome travels to HTTP callers
     // too — a client that cannot tell a deployment which records from one which does not is the thing the
     // third value exists to prevent. This harness composes no writer, so it is `unconfigured`: the absence of
     // a writer is checked BEFORE the absence of a session, because with no writer the session is moot.
     // (The no-session branch is pinned where it is decided — KnowledgeService's own tests.)
-    expect(Object.keys(ctx).sort()).toEqual(["knowledge", "receipt", "skills"]);
+    // `available` joined them on 2026-09-18: this read is agent-facing and its full-body form overflowed a
+    // caller at 20 entries, so it now serves a bounded PROJECTION — and a page that does not say what it is a
+    // page OF reads as the whole set.
+    expect(Object.keys(ctx).sort()).toEqual(["available", "knowledge", "receipt", "skills"]);
     expect(ctx.receipt).toEqual({ recorded: false, reason: "unconfigured" });
     expect(ctx.knowledge).toHaveLength(1);
+    expect(ctx.available).toEqual({ knowledge: 1, skills: 1 });
+    // The BODY does not travel on this surface — it is one `GET /knowledge/entries/:id` away — but its SIZE
+    // does, so a caller can see what it has not read rather than infer there was nothing.
+    expect(ctx.knowledge[0]?.body).toBeUndefined();
+    expect(ctx.knowledge[0]?.bodyChars).toBe(entryPayload.body.length);
+    expect(res.body).not.toContain(entryPayload.body);
     expect(ctx.knowledge[0]?.title).toBe(entryPayload.title);
     expect(ctx.knowledge[0]?.coverage?.state).toBe("behind");
     expect(ctx.knowledge[0]?.relation).toBe("earlier"); // pinned at 2.1.0, anchored at 2.3.0

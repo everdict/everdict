@@ -24,14 +24,29 @@ export function registerKnowledgeTools(server: McpServer, ctx: McpToolContext): 
           "Assemble workspace context for a task: the workspace's knowledge entries (claims/decisions/conventions) and skill candidates ABOUT the anchors ({type, key, version?} — the entities the task concerns), returned as {knowledge, skills}. The anchor's version IS the as-of coordinate: pass an old scorecard's harness@2.1.0 and the knowledge base is projected onto that point (unversioned anchors project onto the present). Each item carries its anchor relation — covers (confirmed at this coordinate) | earlier (about an earlier point; validity here unknown, not wrong) | later (from this coordinate's future, e.g. the eventual fix) | general (timeless family claim) — and a coverage state vs the present (current | behind | unverified). Call this BEFORE working on a harness/dataset/scorecard to inherit what the workspace already knows.",
         inputSchema: {
           refs: z.array(NodeRefSchema).min(1).max(KNOWLEDGE_ENTRY_MAX_REFS),
+          limit: z
+            .number()
+            .int()
+            .min(1)
+            .max(100)
+            .optional()
+            .describe("how many entries and skills to return (default 20); `available` says how many there were"),
         },
       },
-      ({ refs }) =>
+      ({ refs, limit }) =>
         run(principal, "scorecards:read", async () =>
           ok(
-            await knowledge.assembleContext(ws, principal.subject, refs, {
-              ...(ctx.sessionId?.() !== undefined ? { sessionId: ctx.sessionId() as string } : {}),
-            }),
+            // A PROJECTION on this surface, on purpose: one anchor over 20 entries returned 76,617 characters
+            // and exceeded a caller's output limit. The body is one `get_knowledge_entry` away, and `bodyChars`
+            // says how much is behind it — where the delegation brief, which has no second call to make, keeps
+            // the default that carries bodies.
+            await knowledge.assembleContext(
+              ws,
+              principal.subject,
+              refs,
+              { ...(ctx.sessionId?.() !== undefined ? { sessionId: ctx.sessionId() as string } : {}) },
+              { body: "omit", ...(limit !== undefined ? { limit } : {}) },
+            ),
           ),
         ),
     );

@@ -39,6 +39,9 @@ export const UpdateKnowledgeEntryBodySchema = z
 // POST because anchors are structured NodeRefs (keys may contain '/' and ':'), which do not survive a query string.
 export const AssembleContextBodySchema = z.object({
   refs: z.array(NodeRefSchema).min(1).max(KNOWLEDGE_ENTRY_MAX_REFS),
+  // How many to return; `available` in the response says how many matched. Out of range is REFUSED by the
+  // service rather than clamped — a silently adjusted answer answers a question nobody asked.
+  limit: z.number().int().min(1).max(100).optional(),
 });
 
 // The session's account of a `get_task_context` call — what it USED and what the work then did. The path is
