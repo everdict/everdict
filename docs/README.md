@@ -122,7 +122,6 @@ Every document in this tree is listed here. Conventions (single source of truth)
 ## Work, knowledge & the product axis
 - [architecture/development-system-of-record.md](architecture/development-system-of-record.md) — *(proposed)* Everdict as the development system of record: a methodology seed, the work chain, and lineage and direction per service — code repositories keep only their product
 - [architecture/change-campaign-spec.md](architecture/change-campaign-spec.md) — *(proposed)* every code change is a campaign: one lineage from the request to what shipped and what it taught, and the plugin seams that refuse a session which recorded nothing
-- [architecture/two-loop-orchestration-spec.md](architecture/two-loop-orchestration-spec.md) — *(proposed)* spec: the orchestrator's loop above code and the work agents' inside repositories, the seams where a message enters mid-turn, the context pipeline, and which entity carries each lifecycle stage
 - [architecture/knowledge-authoring-and-retrieval-spec.md](architecture/knowledge-authoring-and-retrieval-spec.md) — *(proposed)* how knowledge is written and found: three layers, the claim template, what links to what, and the assessment that retrieval — not storage — is the missing half
 - [tracker.md](tracker.md) — the eval tracker: Initiative ⊃ Project ⊃ Issue (the "why we evaluate" layer)
 - [architecture/product-timeline.md](architecture/product-timeline.md) — Product ⊃ Release over an imported version ledger (the "what we ship" axis)

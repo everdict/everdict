@@ -38,6 +38,24 @@ Before touching code: `list_knowledge_entries` and `list_issues`. A convention a
 that already names this trap, an open request that already describes this work — reading them is cheaper
 than rediscovering them, and rediscovering them is what an unrecorded team does forever.
 
+**Three reads, and they answer different questions.** Reach for the one that matches what you can name:
+
+    get_task_context { refs }   about the ENTITIES YOU NAME — the projection onto an anchor's coordinate.
+                                Answers nothing when you can name nothing, which is the state you open in.
+    search_files { pattern }    NEEDS NO ANCHOR. Case-insensitive over the whole workspace tree: the specs,
+                                plans and wiki under `docs/`, and every knowledge entry's BODY, mirrored to
+                                `knowledge/<id>.md`. This is the read for "I am about to re-derive something
+                                and I do not know what it is called".
+    get_issue_lineage { depth } about HOW A REQUEST CAME TO BE — its campaigns, their rounds and commits, the
+                                knowledge they produced, and with `depth` the chains BACK: the campaign this
+                                one continues, the claim a finding superseded.
+
+⚠️ Searching is not a fallback for failing to anchor. A session at its start genuinely cannot name the
+harness, the campaign or the case it is about to touch, and the anchor read is honest about answering
+nothing then. Asking it anyway and recording an empty `used` measures the question, not the workspace.
+
+⚠️ `truncated: true` on a search is a FLOOR, not the set — narrow the `glob` or `path` and ask again.
+
 ## One issue per thing asked for — the count is the account
 
 A request is satisfied in pieces, and the reader's first question at the end is **"of the N things I asked
