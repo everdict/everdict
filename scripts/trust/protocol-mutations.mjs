@@ -3879,6 +3879,20 @@ const MUTATIONS = [
     build: "@everdict/application-control",
     suite: ["--root", "apps/api", "src/core/github-app/github-app-service.test.ts"],
   },
+  {
+    // ── A DELEGATE'S REPORT OUTLIVES THE PROCESS THAT READ IT (DEFAUL-52) ───────────────────────────
+    //
+    // The run ROW survived a restart and what the delegate SAID did not, because the report lived in an
+    // in-process Map. Neutralized by answering `absent` for every row the live map does not hold — which is
+    // the pre-fix behaviour exactly: a redeploy turned a settled delegation into "no such delegation", and the
+    // round that named it was refused.
+    name: "DEFAUL-52 — a delegation nobody is driving reads as one that never existed",
+    file: "packages/application-control/src/session/sandbox-session-service.ts",
+    from: '      if (record === undefined || record.tenant !== tenant) return { kind: "absent" };',
+    to: '      if (record === undefined || record.tenant !== tenant || record.kind === "sandbox") return { kind: "absent" };',
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/session/delegate-report-durability.counterexample.test.ts"],
+  },
 ];
 
 // ── ONE RUNG AT A TIME, FOR RE-AIMING (arch-review 65) ──────────────────────────────────────────────
