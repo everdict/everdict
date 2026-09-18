@@ -227,3 +227,7 @@ refuses.
 A section becomes `Landed` when its counterexample has been seen RED for the stated reason and the change that
 makes it green is in the tree. Until then the whole document is `status: proposed`, and the numbers in §6 and
 §7 carry the date they were measured on so a later reader can tell a stale count from a current one.
+
+**Counterexample this section owes:** a section marked `Landed` whose counterexample was never seen
+red for the stated reason. The status column is a claim like any other, and a ledger that cannot be
+wrong is decoration — which is the failure this repository already refuses in its gates.
