@@ -1,4 +1,5 @@
-import type { ChangeCampaignRecord, KnowledgeEntryRecord } from "@everdict/contracts";
+import type { ChangeCampaignRecord, IssueRecord, KnowledgeEntryRecord } from "@everdict/contracts";
+import { NotFoundError } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { IssueLineageService } from "./issue-lineage-service.js";
 
@@ -81,9 +82,22 @@ const entry = (id: string, refs: KnowledgeEntryRecord["refs"], supersedes?: stri
   updatedAt: "2026-09-17T00:00:00.000Z",
 });
 
+// ANSWERS THE WAY `IssueService.get` DOES: either spelling resolves to the SAME record, and an unknown ref
+// throws. A fake that echoed the ref back would hide the very defect these tests exist to pin — a lineage
+// asked by `EVD-12` finding nothing because every campaign is filed under the uuid.
+const ISSUE_IDS: Record<string, string> = { "EVD-12": "i-1", "i-1": "i-1", "EVD-13": "i-2", "i-2": "i-2" };
+const issues = {
+  get: async (_tenant: string, ref: string) => {
+    const id = ISSUE_IDS[ref];
+    if (id === undefined) throw new NotFoundError("NOT_FOUND", { id: ref }, `issue '${ref}' not found.`);
+    return { id } as IssueRecord;
+  },
+};
+
 describe("IssueLineageService", () => {
   it("walks request → campaign → round → the commits each service took", async () => {
     const svc = new IssueLineageService({
+      issues,
       changeCampaigns: { list: async () => [campaign("cc-1", "i-1")], get: async () => undefined },
     });
     const lineage = await svc.assemble("acme", "alice", "i-1");
@@ -103,6 +117,7 @@ describe("IssueLineageService", () => {
 
   it("reports EVERY way in, not the first — an entry pinning both is reachable both ways", async () => {
     const svc = new IssueLineageService({
+      issues,
       changeCampaigns: { list: async () => [campaign("cc-1", "i-1")], get: async () => undefined },
       knowledgeEntries: {
         list: async () => [
@@ -128,9 +143,53 @@ describe("IssueLineageService", () => {
   });
 
   // The failure this exists to prevent: a deployment with no evolution store answering as though the request
+  // ── DEFAUL-53: THE SPELLING A MEMBER TYPES ──────────────────────────────────────────────────────────
+  //
+  // ⚠️ A UUID-ONLY TEST CANNOT SEE THIS DEFECT, which is why every other case in this file passed while the
+  // read answered "this request caused nothing" in production. Measured 2026-09-18 on the same issue one
+  // minute apart: `DEFAUL-37` → `{campaigns: [], changes: [], knowledge: []}` with every source reporting
+  // `read`; the uuid → an adopted campaign, a round, two commits and a decision entry.
+  //
+  // Seen RED for the stated reason with the resolution removed (`const issueId = ref`):
+  //   "expected [] to have a length of 1 but got +0"                       → the identifier finds nothing,
+  //   "promise resolved \"{ issueId: 'EVD-99999', …}\" instead of rejecting" → and a ref nobody has is answered.
+  it("answers the identifier a member types exactly as it answers the id", async () => {
+    const svc = new IssueLineageService({
+      issues,
+      // The store holds the campaign under the ISSUE'S ID, because that is what the campaign service resolves
+      // and stores. Nothing in the store knows the identifier exists.
+      changeCampaigns: {
+        list: async (_t, o) => (o?.issueId === "i-1" ? [campaign("cc-1", "i-1")] : []),
+        get: async () => undefined,
+      },
+    });
+
+    const byIdentifier = await svc.assemble("acme", "alice", "EVD-12");
+    const byId = await svc.assemble("acme", "alice", "i-1");
+
+    expect(byIdentifier.campaigns).toHaveLength(1);
+    expect(byIdentifier.campaigns[0]?.id).toBe("cc-1");
+    // …and the whole answer, not just the count: two spellings of one question have one answer.
+    expect(byIdentifier).toEqual(byId);
+  });
+
+  // "There is no such issue" and "this issue caused nothing" are different facts, and only one of them is
+  // news. Answering the second for the first is how a typo reads as a request nobody has worked on.
+  it("refuses a ref the workspace does not have, instead of answering an empty lineage", async () => {
+    const svc = new IssueLineageService({
+      issues,
+      changeCampaigns: { list: async () => [], get: async () => undefined },
+    });
+
+    await expect(svc.assemble("acme", "alice", "EVD-99999")).rejects.toThrow(/issue 'EVD-99999' not found/);
+  });
+
   // had no evaluated campaigns. Absent is a different claim from empty.
   it("says which sources it could not read instead of answering as if they were empty", async () => {
-    const svc = new IssueLineageService({ changeCampaigns: { list: async () => [], get: async () => undefined } });
+    const svc = new IssueLineageService({
+      issues,
+      changeCampaigns: { list: async () => [], get: async () => undefined },
+    });
     const lineage = await svc.assemble("acme", "alice", "i-1");
     expect(lineage.sources).toEqual({
       changeCampaigns: "read",
@@ -146,6 +205,7 @@ describe("IssueLineageService", () => {
 
   it("does not follow the chain at depth 1 — the original one-hop answer is unchanged", async () => {
     const svc = new IssueLineageService({
+      issues,
       changeCampaigns: {
         list: async () => [campaign("cc-2", "i-1", "cc-1")],
         get: async (_t, id) => (id === "cc-1" ? campaign("cc-1", "i-0") : undefined),
@@ -160,6 +220,7 @@ describe("IssueLineageService", () => {
 
   it("walks `continues` back to the campaign whose remainder this one picked up", async () => {
     const svc = new IssueLineageService({
+      issues,
       changeCampaigns: {
         list: async () => [campaign("cc-3", "i-1", "cc-2")],
         get: async (_t, id) =>
@@ -179,6 +240,7 @@ describe("IssueLineageService", () => {
 
   it("walks `supersedes` to the claim that was corrected, and says which entry replaced it", async () => {
     const svc = new IssueLineageService({
+      issues,
       changeCampaigns: { list: async () => [], get: async () => undefined },
       knowledgeEntries: {
         list: async () => [
@@ -204,6 +266,7 @@ describe("IssueLineageService", () => {
 
   it("stops on a cycle and COUNTS it — a chain pointing at itself is a defect in the records", async () => {
     const svc = new IssueLineageService({
+      issues,
       changeCampaigns: {
         list: async () => [campaign("cc-a", "i-1", "cc-b")],
         get: async (_t, id) =>
@@ -217,6 +280,7 @@ describe("IssueLineageService", () => {
 
   it("counts a chain step it could not fetch instead of ending the chain quietly", async () => {
     const svc = new IssueLineageService({
+      issues,
       changeCampaigns: {
         list: async () => [campaign("cc-9", "i-1", "cc-gone")],
         get: async () => undefined, // the predecessor is not readable here
@@ -229,7 +293,10 @@ describe("IssueLineageService", () => {
   });
 
   it("refuses a depth outside the range rather than clamping it", async () => {
-    const svc = new IssueLineageService({ changeCampaigns: { list: async () => [], get: async () => undefined } });
+    const svc = new IssueLineageService({
+      issues,
+      changeCampaigns: { list: async () => [], get: async () => undefined },
+    });
     await expect(svc.assemble("acme", "alice", "i-1", { depth: 50 })).rejects.toThrow(/depth must be an integer/);
     await expect(svc.assemble("acme", "alice", "i-1", { depth: 0 })).rejects.toThrow(/depth must be an integer/);
   });

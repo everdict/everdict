@@ -8,6 +8,7 @@ import { BadRequestError } from "@everdict/contracts";
 import { summariseAnswers } from "@everdict/domain";
 import type { ChangeCampaignStore } from "../ports/change-campaign-store.js";
 import type { EvolutionCampaignStore } from "../ports/evolution-campaign-store.js";
+import type { IssueRefResolver } from "../ports/issue-ref-resolver.js";
 import type { KnowledgeEntryStore } from "../ports/knowledge-entry-store.js";
 
 // ── LINEAGE FROM THE REQUEST ─────────────────────────────────────────────────────────────────────────
@@ -121,6 +122,18 @@ export interface IssueLineageDeps {
   changeCampaigns?: Pick<ChangeCampaignStore, "list" | "get">;
   evolutionCampaigns?: Pick<EvolutionCampaignStore, "list">;
   knowledgeEntries?: Pick<KnowledgeEntryStore, "list">;
+  // ── THE REF IS RESOLVED BEFORE ANYTHING IS LOOKED UP (DEFAUL-53) ────────────────────────────────────
+  //
+  // REQUIRED, unlike the three stores above, and the difference is deliberate. A missing STORE is a source
+  // this deployment does not have, and the read says so (`sources`). A missing RESOLVER is not a smaller
+  // answer — it is the same answer computed against the wrong key, and it comes back looking correct.
+  //
+  // Measured: `get_issue_lineage { id: "DEFAUL-37" }` returned `{campaigns: [], changes: [], knowledge: []}`
+  // with every source reporting `read`, for a request that had an adopted campaign, a round, two commits and
+  // a decision entry. Campaigns are filed under the uuid because `ChangeCampaignService.open` resolves the
+  // ref before storing — and the comment there names this exact failure: "the lineage read (which asks by id)
+  // simply does not find the ones typed the other way". The write side learned it; this read had not.
+  issues: IssueRefResolver;
 }
 
 export interface AssembleLineageOptions {
@@ -160,9 +173,14 @@ export class IssueLineageService {
   async assemble(
     tenant: string,
     subject: string,
-    issueId: string,
+    ref: string,
     options?: AssembleLineageOptions,
   ): Promise<IssueLineage> {
+    // Whichever spelling the caller used, the key every source is filed under is the id the resolution
+    // produced. A ref the workspace does not have THROWS here (NotFoundError) rather than walking on to
+    // answer an empty lineage: "there is no such issue" and "this request caused nothing" are different
+    // facts, and only one of them is news.
+    const issueId = (await this.deps.issues.get(tenant, ref)).id;
     const depth = resolveDepth(options?.depth);
     const walk = { requested: depth, reached: 1, truncated: false, cycles: 0, unresolved: 0 };
     const deepen = (d: number) => {

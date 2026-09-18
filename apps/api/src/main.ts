@@ -418,15 +418,6 @@ async function main(): Promise<void> {
     receipts: fsRetrievalReceiptWriter(workspaceFs),
   });
 
-  // One read from the request to everything it caused (docs/architecture/change-campaign-spec.md §Lineage).
-  // Composed, never materialised: a lineage table would be a second authority that can disagree with the
-  // records it summarises. Each source is optional and the read SAYS which ones it could not reach.
-  const issueLineageService = new IssueLineageService({
-    changeCampaigns: changeCampaignStore,
-    evolutionCampaigns: campaignStore,
-    knowledgeEntries: knowledgeEntryStore,
-  });
-
   // The schedule↔membership↔scorecard construction cycle: MembershipService's member-removal hook needs the
   // late-built ScheduleService (it depends on ScorecardService). The hook closes over this reference, resolved by
   // wireScheduleService near the end of boot. See composition/schedule.ts.
@@ -1983,6 +1974,20 @@ async function main(): Promise<void> {
         }
       : {}),
   });
+  // One read from the request to everything it caused (docs/architecture/change-campaign-spec.md §Lineage).
+  // Composed, never materialised: a lineage table would be a second authority that can disagree with the
+  // records it summarises. Each source is optional and the read SAYS which ones it could not reach.
+  //
+  // Built AFTER the tracker because the ref has to be resolved before any source is looked up (DEFAUL-53):
+  // every campaign is filed under the issue's id, so a lineage asked by `EVD-12` found nothing and said so as
+  // though the request had caused nothing.
+  const issueLineageService = new IssueLineageService({
+    changeCampaigns: changeCampaignStore,
+    evolutionCampaigns: campaignStore,
+    knowledgeEntries: knowledgeEntryStore,
+    issues: issueService,
+  });
+
   // The `change` grade of campaign (docs/architecture/change-campaign-spec.md): every code change belongs to
   // one, judged by the agent that made it against criteria declared before the work. Postgres when there is
   // one, memory otherwise — the same contract either way.
