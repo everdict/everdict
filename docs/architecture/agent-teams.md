@@ -2,8 +2,8 @@
 kind: wiki
 title: "Agent teams — message-based collaboration + proactive agents over the eval control plane"
 status: current
-updated: 2026-09-15
-anchors: [apps/agent/src/agent-mailbox.ts, apps/agent/src/teammate-supervisor.ts, packages/agent-runtime/src/tools/send-message-tool.ts, packages/contracts/src/records/agent-task.ts, apps/agent/src/action-policy.ts]
+updated: 2026-09-18
+anchors: [apps/agent/src/agent-mailbox.ts, packages/contracts/src/records/agent-inbox.ts, apps/agent/src/teammate-supervisor.ts, packages/agent-runtime/src/tools/send-message-tool.ts, packages/contracts/src/records/agent-task.ts, apps/agent/src/action-policy.ts]
 ---
 # Agent teams — message-based collaboration + proactive agents over the eval control plane
 
@@ -31,22 +31,41 @@ anchors: [apps/agent/src/agent-mailbox.ts, apps/agent/src/teammate-supervisor.ts
 ## Architecture
 
 ```
-              ┌──────────── AgentMailbox (per workspace × session, in-process) ────────────┐
-  user ──────▶│  envelope { from: user|agent|event, sender?, content }                     │
-  teammate ──▶│  addressed by (workspace, sessionId)                                       │──▶ drainInput ─▶ loop turn
-  platform ──▶│  attribution-rendered on drain                                             │
-              └────────────────────────────────────────────────────────────────────────────┘
+              ┌──── AgentMailbox over everdict_agent_inbox (per workspace × session, DURABLE) ────┐
+  user ──────▶│  row { seq, from: user|agent|event, sender?, content, queued|delivered|discarded } │
+  teammate ──▶│  addressed by (workspace, sessionId) · seq returned to the sender as its receipt   │──▶ drainInput ─▶ loop turn
+  platform ──▶│  claimed atomically on drain, attribution-rendered                                 │
+              └───────────────────────────────────────────────────────────────────────────────────┘
                      ▲                                   ▲
         send_message tool (agent→agent)      POST /agent/events (control plane → watching teammates)
 ```
 
 ### The message substrate
-`AgentMailbox` (`apps/agent/src/agent-mailbox.ts`): `enqueue(workspace, sessionId, envelope)` /
-`drain(workspace, sessionId) → ChatMessage[]`. The envelope carries `from` (`user` | `agent` | `event`), an optional
-`sender`, and `content`. Drain renders attribution: user → verbatim; agent → `[Message from teammate <sender>]`;
-event → `[Everdict event — <sender>]`. `POST /agent/sessions/:id/input` enqueues a `from: user` message;
-`POST /agent/sessions/:id/event` an `event`-attributed one. The mailbox is in-memory — a message not yet drained
-does not survive an agent-service restart.
+`AgentMailbox` (`apps/agent/src/agent-mailbox.ts`): `enqueue(workspace, sessionId, envelope) → MailboxReceipt` /
+`drain(workspace, sessionId) → ReadResult<ChatMessage[]>`. The envelope carries `from` (`user` | `agent` | `event`),
+an optional `sender`, and `content`. Drain renders attribution: user → verbatim; agent →
+`[Message from teammate <sender>]`; event → `[Everdict event — <sender>]`. `POST /agent/sessions/:id/input` enqueues
+a `from: user` message; `POST /agent/sessions/:id/event` an `event`-attributed one.
+
+**The channel is a DURABLE ORDERED LOG** (`everdict_agent_inbox`, migration 0220 — `AgentInboxEntry` in
+`@everdict/contracts`, the four `AgentSessionStore.*Inbox` methods). It used to be a `Map` in this process, and
+the asymmetry that made that a defect rather than a limitation is that the roster's durable half already survived:
+a restart re-registered the teammate and dropped what it had been told. Three properties, and each one is a
+protocol rather than a convention:
+
+- **Ordered.** The store assigns `seq` and RETURNS it, so a sender holding X's receipt before sending Y has
+  "X before Y" as a fact. Nothing re-sends — a channel whose correctness depends on the caller remembering what
+  it already said only works while every caller is a process that survived, which is the case the channel is for.
+- **Delivery state is a column** (`queued` | `delivered` | `discarded`), not a fact the answering process holds.
+  `POST /input` answers `202 { queued: true, seq }` only after the row exists (protocol L1); a stop `discards`
+  rather than deletes, so "the supervisor took it back" stays distinguishable from "it is still waiting".
+  The claim is one conditional `UPDATE … RETURNING`, so two replicas cannot both absorb the same instruction.
+- **An unreadable log is not an empty one.** `drain` is three-valued and `mailboxDrainInput` is its one consumer:
+  on `unknown` it ABORTS the turn and leaves the rows queued, because an agent that cannot hear its supervisor
+  must stop rather than continue on the last thing it heard (protocol L2).
+
+On boot, `restoreTeammates` reads `listQueuedInboxSessions` and **wakes** the restored teammates whose log is
+non-empty (`{restored, woken}`) — a durable log nobody reads on boot is a table.
 
 ### Agent-to-agent: `send_message`
 A kernel tool (`packages/agent-runtime/src/tools/send-message-tool.ts`) with two reaches:
@@ -72,7 +91,8 @@ token ([agent-execution-auth.md](./agent-execution-auth.md)), which acts AS the 
 - `GET /agent/teammates` lists the caller's teammates; `DELETE /agent/teammates/:id` stops one (unregister + revoke
   its token; the transcript is kept). The `list_teammates` tool gives an agent the same roster.
 - **Restart survival.** The roster's durable half is `AgentSessionRecord.teammate`; on boot the agent service
-  re-registers every standing teammate, re-mints its token, and revokes the stale key — without waking it.
+  re-registers every standing teammate, re-mints its token, and revokes the stale key — quietly, EXCEPT where the
+  steering log holds instructions the previous process never delivered, which are the next message and wake it.
 - **Web.** The Team menu in the chat header (`apps/web/src/features/agent-chat/ui/team-menu.tsx`, over the BFF routes
   under `apps/web/src/app/api/agent/teammates/`) lists, spawns (name + standing task + watched kinds), and stops
   teammates.

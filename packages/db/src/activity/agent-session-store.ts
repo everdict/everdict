@@ -1,5 +1,8 @@
 import type { AgentSessionStore } from "@everdict/application-control";
 import {
+  type AgentInboxAppend,
+  type AgentInboxEntry,
+  AgentInboxEntrySchema,
   type AgentMessageRecord,
   AgentMessageRecordSchema,
   type AgentPermissionMode,
@@ -8,6 +11,7 @@ import {
   AgentSessionRecordSchema,
   type AgentTeammateConfig,
   type AgentWakeIntent,
+  InternalError,
 } from "@everdict/contracts";
 import type { SqlClient } from "../client.js";
 
@@ -25,6 +29,10 @@ function withWakeIntent(
 export class InMemoryAgentSessionStore implements AgentSessionStore {
   private readonly sessions: AgentSessionRecord[] = [];
   private readonly messages: AgentMessageRecord[] = [];
+  // The steering log. Monotonic across the store like the Postgres BIGSERIAL, so the two twins order a
+  // session's instructions the same way.
+  private readonly inbox: AgentInboxEntry[] = [];
+  private inboxSeq = 0;
 
   async createSession(record: AgentSessionRecord): Promise<void> {
     this.sessions.push(record);
@@ -219,6 +227,10 @@ export class InMemoryAgentSessionStore implements AgentSessionStore {
       const m = this.messages[i];
       if (m && m.tenant === tenant && m.sessionId === id) this.messages.splice(i, 1);
     }
+    for (let i = this.inbox.length - 1; i >= 0; i--) {
+      const e = this.inbox[i];
+      if (e && e.tenant === tenant && e.sessionId === id) this.inbox.splice(i, 1);
+    }
   }
 
   async appendMessages(records: AgentMessageRecord[]): Promise<void> {
@@ -229,6 +241,62 @@ export class InMemoryAgentSessionStore implements AgentSessionStore {
     return this.messages
       .filter((m) => m.tenant === tenant && m.sessionId === sessionId && (sinceSeq === undefined || m.seq > sinceSeq))
       .sort((a, b) => a.seq - b.seq);
+  }
+
+  async appendInbox(entry: AgentInboxAppend, at: string): Promise<AgentInboxEntry> {
+    this.inboxSeq += 1;
+    const stored: AgentInboxEntry = {
+      id: crypto.randomUUID(),
+      tenant: entry.tenant,
+      sessionId: entry.sessionId,
+      seq: this.inboxSeq,
+      from: entry.from,
+      ...(entry.sender !== undefined ? { sender: entry.sender } : {}),
+      content: entry.content,
+      at,
+      delivery: { state: "queued" },
+    };
+    this.inbox.push(stored);
+    return { ...stored };
+  }
+
+  async claimInbox(tenant: string, sessionId: string, at: string): Promise<AgentInboxEntry[]> {
+    return this.settleInbox(tenant, sessionId, "delivered", at);
+  }
+
+  async discardInbox(tenant: string, sessionId: string, at: string): Promise<AgentInboxEntry[]> {
+    return this.settleInbox(tenant, sessionId, "discarded", at);
+  }
+
+  async listQueuedInboxSessions(opts?: { limit?: number }): Promise<
+    { tenant: string; sessionId: string; queued: number }[]
+  > {
+    const counts = new Map<string, { tenant: string; sessionId: string; queued: number }>();
+    for (const entry of this.inbox) {
+      if (entry.delivery.state !== "queued") continue;
+      const key = `${entry.tenant}:${entry.sessionId}`;
+      const seen = counts.get(key);
+      if (seen) seen.queued += 1;
+      else counts.set(key, { tenant: entry.tenant, sessionId: entry.sessionId, queued: 1 });
+    }
+    return [...counts.values()].slice(0, opts?.limit ?? 500);
+  }
+
+  // The claim and the discard are ONE operation with two endings, for the same reason the Postgres twin runs
+  // one conditional UPDATE: whatever takes the queued rows must take all of them, in seq order, and leave
+  // nothing a second caller could take again. Scoped by tenant AND session — the twin that ignores the tenant
+  // is more permissive than production on the one axis where that is worst (rule `testing`).
+  private settleInbox(
+    tenant: string,
+    sessionId: string,
+    state: "delivered" | "discarded",
+    at: string,
+  ): AgentInboxEntry[] {
+    const taken = this.inbox
+      .filter((e) => e.tenant === tenant && e.sessionId === sessionId && e.delivery.state === "queued")
+      .sort((a, b) => a.seq - b.seq);
+    for (const entry of taken) entry.delivery = { state, at };
+    return taken.map((entry) => ({ ...entry }));
   }
 }
 
@@ -316,6 +384,41 @@ function messageRowToRecord(row: MessageRow): AgentMessageRecord {
     createdAt: new Date(row.created_at).toISOString(),
   });
 }
+
+// ── THE STEERING LOG'S ROW ────────────────────────────────────────────────────────────────────────────
+interface InboxRow {
+  id: string;
+  seq: string | number; // bigserial — pg returns bigint as a string
+  tenant: string;
+  session_id: string;
+  source: string;
+  sender: string | null;
+  content: string;
+  created_at: string | Date;
+  disposition: string;
+  settled_at: string | Date | null;
+}
+
+function inboxRowToEntry(row: InboxRow): AgentInboxEntry {
+  // The delivery state is PARSED from the pair the row holds, and a settled row with no timestamp is a
+  // refusal rather than a silent `queued`: the union's whole purpose is that "taken back" and "still
+  // waiting" cannot render as each other.
+  const settledAt = row.settled_at === null ? undefined : new Date(row.settled_at).toISOString();
+  const delivery = row.disposition === "queued" ? { state: "queued" } : { state: row.disposition, at: settledAt };
+  return AgentInboxEntrySchema.parse({
+    id: row.id,
+    tenant: row.tenant,
+    sessionId: row.session_id,
+    seq: Number(row.seq),
+    from: row.source,
+    ...(row.sender !== null ? { sender: row.sender } : {}),
+    content: row.content,
+    at: new Date(row.created_at).toISOString(),
+    delivery,
+  });
+}
+
+const INBOX_COLUMNS = "id, seq, tenant, session_id, source, sender, content, created_at, disposition, settled_at";
 
 export class PgAgentSessionStore implements AgentSessionStore {
   constructor(private readonly client: SqlClient) {}
@@ -577,6 +680,9 @@ export class PgAgentSessionStore implements AgentSessionStore {
 
   async deleteSession(tenant: string, owner: string, id: string): Promise<void> {
     await this.client.query("DELETE FROM everdict_agent_messages WHERE tenant = $1 AND session_id = $2", [tenant, id]);
+    // The steering log goes with the conversation it addressed: a queued instruction for a deleted session
+    // would otherwise keep that session in the boot read forever, waking nothing.
+    await this.client.query("DELETE FROM everdict_agent_inbox WHERE tenant = $1 AND session_id = $2", [tenant, id]);
     await this.client.query("DELETE FROM everdict_agent_sessions WHERE tenant = $1 AND owner = $2 AND id = $3", [
       tenant,
       owner,
@@ -626,5 +732,65 @@ export class PgAgentSessionStore implements AgentSessionStore {
       [tenant, sessionId],
     );
     return res.rows.map(messageRowToRecord);
+  }
+  async appendInbox(entry: AgentInboxAppend, at: string): Promise<AgentInboxEntry> {
+    // RETURNING, not a bare INSERT: the caller is about to answer a member "queued", and it may only do so
+    // on the strength of a row the store says exists (protocol L1). The seq it hands back is also the
+    // ordering token — a sender holding it before sending the next instruction has "X before Y" as a fact.
+    const res = await this.client.query<InboxRow>(
+      `INSERT INTO everdict_agent_inbox (id, tenant, session_id, source, sender, content, created_at, disposition)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'queued')
+       RETURNING ${INBOX_COLUMNS}`,
+      [crypto.randomUUID(), entry.tenant, entry.sessionId, entry.from, entry.sender ?? null, entry.content, at],
+    );
+    const row = res.rows[0];
+    if (!row)
+      throw new InternalError(
+        "UPSTREAM_ERROR",
+        { sessionId: entry.sessionId },
+        "the steering message was not stored — refusing to report it as queued.",
+      );
+    return inboxRowToEntry(row);
+  }
+
+  async claimInbox(tenant: string, sessionId: string, at: string): Promise<AgentInboxEntry[]> {
+    return this.settleInbox(tenant, sessionId, "delivered", at);
+  }
+
+  async discardInbox(tenant: string, sessionId: string, at: string): Promise<AgentInboxEntry[]> {
+    return this.settleInbox(tenant, sessionId, "discarded", at);
+  }
+
+  async listQueuedInboxSessions(opts?: { limit?: number }): Promise<
+    { tenant: string; sessionId: string; queued: number }[]
+  > {
+    const res = await this.client.query<{ tenant: string; session_id: string; queued: string | number }>(
+      `SELECT tenant, session_id, COUNT(*) AS queued
+       FROM everdict_agent_inbox WHERE disposition = 'queued'
+       GROUP BY tenant, session_id
+       ORDER BY MIN(seq) ASC
+       LIMIT $1`,
+      [opts?.limit ?? 500],
+    );
+    return res.rows.map((row) => ({ tenant: row.tenant, sessionId: row.session_id, queued: Number(row.queued) }));
+  }
+
+  // ONE conditional UPDATE, not a SELECT followed by a write: two replicas (or a wake racing a turn
+  // boundary) selecting the same queued rows would otherwise both absorb them, and the instruction would be
+  // delivered twice. `RETURNING` in seq order is the claim AND the read — whoever wins gets the rows, the
+  // loser gets none.
+  private async settleInbox(
+    tenant: string,
+    sessionId: string,
+    disposition: "delivered" | "discarded",
+    at: string,
+  ): Promise<AgentInboxEntry[]> {
+    const res = await this.client.query<InboxRow>(
+      `UPDATE everdict_agent_inbox SET disposition = $4, settled_at = $3
+       WHERE tenant = $1 AND session_id = $2 AND disposition = 'queued'
+       RETURNING ${INBOX_COLUMNS}`,
+      [tenant, sessionId, at, disposition],
+    );
+    return [...res.rows].sort((a, b) => Number(a.seq) - Number(b.seq)).map(inboxRowToEntry);
   }
 }

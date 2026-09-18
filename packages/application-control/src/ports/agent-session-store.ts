@@ -1,4 +1,6 @@
 import type {
+  AgentInboxAppend,
+  AgentInboxEntry,
   AgentMessageRecord,
   AgentPermissionMode,
   AgentRunStatus,
@@ -104,4 +106,29 @@ export interface AgentSessionStore {
   appendMessages(records: AgentMessageRecord[]): Promise<void>;
   // Oldest first (seq ascending). With sinceSeq, only messages whose seq is strictly greater (polling).
   listMessages(tenant: string, sessionId: string, sinceSeq?: number): Promise<AgentMessageRecord[]>;
+
+  // ── THE STEERING LOG (DEFAUL-37) ───────────────────────────────────────────────────────────────────
+  //
+  // The orchestrator↔worker channel. It lives here, beside the transcript, because it is the same
+  // durability question about the same session: the roster survived a restart and what the roster had been
+  // TOLD did not. See `AgentInboxEntry` for why each part of the row is not optional.
+
+  // Append one instruction and RETURN THE STORED ROW — the seq the store assigned, not a `Promise<void>` the
+  // caller reads as success (protocol L1: no external effect, and no `202 queued` answered to a member,
+  // until a store has returned proof the message is durable).
+  appendInbox(entry: AgentInboxAppend, at: string): Promise<AgentInboxEntry>;
+  // Atomically CLAIM everything still queued for a session, oldest first: the rows are marked delivered and
+  // returned in one statement, so two replicas (or a wake racing a turn boundary) cannot both absorb the same
+  // instruction. A crash between the claim and the model call loses the message — which is why this is the
+  // seam a turn calls at its boundary and not something a monitor may call to "peek".
+  claimInbox(tenant: string, sessionId: string, at: string): Promise<AgentInboxEntry[]>;
+  // The member stopped the turn before the boundary that would have absorbed these. They are ENDED, not
+  // deleted: "the supervisor took it back" and "it is still waiting" are different facts and become the same
+  // one the moment the row is gone. Returns what was taken, so the caller can hand the member's own words
+  // back to their composer.
+  discardInbox(tenant: string, sessionId: string, at: string): Promise<AgentInboxEntry[]>;
+  // Every session with an undelivered instruction, across ALL workspaces — the boot read (the sibling of
+  // listTeammateSessions). A restored teammate whose channel holds unread work must be WOKEN, or the
+  // durability bought here is a row nobody reads.
+  listQueuedInboxSessions(opts?: { limit?: number }): Promise<{ tenant: string; sessionId: string; queued: number }[]>;
 }

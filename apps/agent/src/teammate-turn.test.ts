@@ -57,8 +57,8 @@ describe("runTeammateTurn", () => {
       createdAt: now,
       updatedAt: now,
     });
-    const mailbox = new AgentMailbox();
-    mailbox.enqueue("acme", "tm1", { from: "agent", sender: "lead", content: "dig into sc_123" });
+    const mailbox = new AgentMailbox(new InMemoryAgentSessionStore(), () => new Date().toISOString());
+    await mailbox.enqueue("acme", "tm1", { from: "agent", sender: "lead", content: "dig into sc_123" });
 
     await runTeammateTurn(makeDeps(sessions), authenticate, mailbox, "tm1", "agt_test");
 
@@ -67,7 +67,7 @@ describe("runTeammateTurn", () => {
     expect(msgs.some((m) => m.role === "user" && m.content.includes("dig into sc_123"))).toBe(true);
     expect(msgs.some((m) => m.role === "assistant" && m.content === "on it")).toBe(true);
     // The mailbox was consumed.
-    expect(mailbox.drain("acme", "tm1")).toEqual([]);
+    expect(await mailbox.drain("acme", "tm1")).toEqual({ kind: "read", value: [] });
   });
 
   it("is a no-op when the teammate is woken with an empty mailbox", async () => {
@@ -80,7 +80,13 @@ describe("runTeammateTurn", () => {
       createdAt: now,
       updatedAt: now,
     });
-    await runTeammateTurn(makeDeps(sessions), authenticate, new AgentMailbox(), "tm2", "agt_test");
+    await runTeammateTurn(
+      makeDeps(sessions),
+      authenticate,
+      new AgentMailbox(new InMemoryAgentSessionStore(), () => new Date().toISOString()),
+      "tm2",
+      "agt_test",
+    );
     expect(await sessions.listMessages("acme", "tm2")).toEqual([]);
   });
 });

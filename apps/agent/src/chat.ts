@@ -714,7 +714,9 @@ export interface ChatHooks {
   }) => void;
   // Mid-run steering: pull any user messages the web queued (POST /input) since this turn started, so the running loop
   // absorbs them at the next turn boundary instead of the user having to Stop and resend. Absent → strict turn-based.
-  drainInput?: () => ChatMessage[];
+  // ASYNC, because the queue is a durable log rather than a Map (DEFAUL-37) — and because what an unreadable log
+  // means is a decision the seam's one owner makes (mailboxDrainInput), never something a host improvises here.
+  drainInput?: () => Promise<ChatMessage[]>;
   // Soft interrupt (Claude Code's ESC): receives the loop's step-interrupt trigger — aborts only the in-flight
   // step (model stream / tool batch); with queued input the turn continues redirected, bare it ends "interrupted".
   // The host parks the trigger (LiveTurnRegistry) so POST /interrupt can fire it. Absent → no soft interrupt.

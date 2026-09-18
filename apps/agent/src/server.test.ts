@@ -538,9 +538,13 @@ describe("agent server", () => {
 
     // When a fresh process boots against the same stores and restores the roster
     const after = buildServer(makeDeps({ sessions, keyStore }));
-    const restorer = (after as unknown as { teammateRestorer?: { restore: () => Promise<number> } }).teammateRestorer;
+    const restorer = (
+      after as unknown as { teammateRestorer?: { restore: () => Promise<{ restored: number; woken: number }> } }
+    ).teammateRestorer;
     expect(restorer).toBeDefined();
-    expect(await restorer?.restore()).toBe(1);
+    // Nothing was said to it while it was gone, so nothing to wake it for — the woken count is about the
+    // steering log, not about the roster (DEFAUL-37).
+    expect(await restorer?.restore()).toEqual({ restored: 1, woken: 0 });
 
     // Then the roster lists the teammate again…
     const roster = (await after.inject({ method: "GET", url: "/agent/teammates", headers: auth })).json().teammates as {
@@ -562,6 +566,70 @@ describe("agent server", () => {
     // …and dismissal clears the durable config so a THIRD boot does not resurrect it
     await after.inject({ method: "DELETE", url: `/agent/teammates/${spawned.id}`, headers: auth });
     expect(await sessions.listTeammateSessions()).toHaveLength(0);
+    await after.close();
+  });
+
+  // ── DEFAUL-37: THE INSTRUCTION SURVIVES THE RESTART, AND THE ORCHESTRATOR DOES NOT RE-SEND ─────────
+  //
+  // The issue's disproof, driven through the HTTP surface: a supervisor steers a teammate, the agent service
+  // dies before the message is drained, and a fresh process delivers it. The "previous process" here is the
+  // middle server — one that took the instruction (202, with the store's seq) and died before any turn
+  // absorbed it, which is exactly the incident. Seen RED on the pre-change substrate: the middle process's
+  // Map died with it, the boot read found nothing, and the teammate came back with an empty prompt.
+  it("a steering message queued before a restart is delivered after it, in order, with nothing re-sent (DEFAUL-37)", async () => {
+    const sessions = new InMemoryAgentSessionStore();
+    const keyStore = new InMemoryTenantKeyStore();
+    const before = buildServer(makeDeps({ sessions, keyStore }));
+    const spawned = (
+      await before.inject({
+        method: "POST",
+        url: "/agent/teammates",
+        headers: auth,
+        payload: { name: "watcher", task: "watch regressions", watch: ["scorecard.regressed"] },
+      })
+    ).json();
+    await new Promise((r) => setTimeout(r, 30));
+    await before.close();
+
+    // A process that accepted two instructions and died before delivering either. It never restored the
+    // roster, so nothing in it wakes the teammate — the messages simply land in the log.
+    const middle = buildServer(makeDeps({ sessions, keyStore }));
+    const first = await middle.inject({
+      method: "POST",
+      url: `/agent/sessions/${spawned.id}/input`,
+      headers: auth,
+      payload: { message: "do X" },
+    });
+    // The 202 is answered on the strength of a stored row, and it names the seq that orders it (L1).
+    expect(first.statusCode).toBe(202);
+    expect(first.json().seq).toBeGreaterThan(0);
+    const second = await middle.inject({
+      method: "POST",
+      url: `/agent/sessions/${spawned.id}/input`,
+      headers: auth,
+      payload: { message: "then Y" },
+    });
+    expect(second.json().seq).toBeGreaterThan(first.json().seq);
+    await middle.close();
+
+    // When a fresh process boots against the same stores and restores the roster.
+    const after = buildServer(makeDeps({ sessions, keyStore }));
+    const restorer = (
+      after as unknown as { teammateRestorer?: { restore: () => Promise<{ restored: number; woken: number }> } }
+    ).teammateRestorer;
+    // Then it WAKES the teammate for what it was told while it was gone — a durable log nobody reads on boot
+    // is a table.
+    expect(await restorer?.restore()).toEqual({ restored: 1, woken: 1 });
+
+    await new Promise((r) => setTimeout(r, 50));
+    const msgs = (
+      await after.inject({ method: "GET", url: `/agent/sessions/${spawned.id}/messages`, headers: auth })
+    ).json().messages as { role: string; content: string }[];
+    const steering = msgs.filter(
+      (m) => m.role === "user" && (m.content.includes("do X") || m.content.includes("then Y")),
+    );
+    expect(steering).toHaveLength(1); // both rode into ONE turn's prompt
+    expect(steering[0]?.content.indexOf("do X")).toBeLessThan(steering[0]?.content.indexOf("then Y") ?? -1);
     await after.close();
   });
 

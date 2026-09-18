@@ -1,6 +1,7 @@
 // Stored record schemas (results / activity / workspace policy) — moved from @everdict/db in re-architecture P0c/P2c.
 // Store interfaces/impls (RunStore, InMemory*/Pg*) stay in @everdict/db — only wire-visible shapes live here.
 export * from "./approval.js";
+export * from "./agent-inbox.js";
 export * from "./agent-session.js";
 export * from "./agent-task.js";
 export * from "./agent-member-preference.js";

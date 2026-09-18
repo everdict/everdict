@@ -10,6 +10,7 @@ import type {
   SubscriptionRecord,
   TraceEvent,
 } from "@everdict/contracts";
+import { InMemoryAgentSessionStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import {
   type ActivationEnvelope,
@@ -85,6 +86,7 @@ function keyStoreStub() {
 }
 
 function sessionsStub() {
+  const inbox = new InMemoryAgentSessionStore();
   const created: AgentSessionRecord[] = [];
   const statuses: Array<{ id: string; status: string }> = [];
   const messages: AgentMessageRecord[] = [];
@@ -150,6 +152,16 @@ function sessionsStub() {
     async listMessages(_tenant: string, sessionId: string, sinceSeq?: number) {
       return messages.filter((m) => m.sessionId === sessionId && (sinceSeq === undefined || m.seq > sinceSeq));
     },
+    // ── THE STEERING LOG IS THE REAL TWIN, NOT A STUB ────────────────────────────────────────────────
+    //
+    // A hand-rolled `async claimInbox() { return []; }` would make every assertion about a seeded activation
+    // green over a channel that delivered nothing — the always-empty sibling of the always-succeeds double
+    // (rule `testing`). Delegating to `InMemoryAgentSessionStore` is cheap and makes the same decision
+    // production makes, including the tenant scoping and the one-shot claim.
+    appendInbox: inbox.appendInbox.bind(inbox),
+    claimInbox: inbox.claimInbox.bind(inbox),
+    discardInbox: inbox.discardInbox.bind(inbox),
+    listQueuedInboxSessions: inbox.listQueuedInboxSessions.bind(inbox),
   };
 }
 
@@ -174,7 +186,7 @@ function activator(opts: {
 }) {
   const sessions = opts.sessions ?? sessionsStub();
   const keyStore = opts.keyStore ?? keyStoreStub();
-  const mailbox = new AgentMailbox();
+  const mailbox = new AgentMailbox(new InMemoryAgentSessionStore(), () => new Date().toISOString());
   const runs: Array<{ sessionId: string; token: string }> = [];
   const reports: Array<{ kind: string; runId?: string; trace?: TraceEvent[]; message?: string }> = [];
   const instance = new AgentActivator({
@@ -399,7 +411,7 @@ describe("AgentActivator", () => {
     const approvals: string[] = [];
     const sessions = sessionsStub();
     const registry = registryOf(spec({ permissionMode: "default" }));
-    const mailbox = new AgentMailbox();
+    const mailbox = new AgentMailbox(new InMemoryAgentSessionStore(), () => new Date().toISOString());
     const keyStore = keyStoreStub();
     const instance = new AgentActivator({
       registry,
@@ -436,7 +448,7 @@ describe("AgentActivator", () => {
     const base = {
       sessions: sessionsStub(),
       keyStore: keyStoreStub(),
-      mailbox: new AgentMailbox(),
+      mailbox: new AgentMailbox(new InMemoryAgentSessionStore(), () => new Date().toISOString()),
       now: () => new Date().toISOString(),
     };
     const instance = new AgentActivator({
@@ -567,8 +579,11 @@ describe("AgentActivator.resumeInterrupted — the P0 restart-recovery leg", () 
     expect(runs).toHaveLength(1);
     expect(runs[0]?.sessionId).toBe("sess-9");
     // The turn woke up to the recovery notice (verify-before-repeating discipline included).
-    const drained = mailbox.drain("acme", "sess-9");
-    expect(drained.some((m) => typeof m.content === "string" && m.content.includes("[restart recovery]"))).toBe(true);
+    const drained = await mailbox.drain("acme", "sess-9");
+    if (drained.kind !== "read") throw new Error(`the steering log must be readable here, got ${drained.kind}`);
+    expect(drained.value.some((m) => typeof m.content === "string" && m.content.includes("[restart recovery]"))).toBe(
+      true,
+    );
     // Recovery by resumption keeps the durable dedup honest: the (agent, event) pair still reads as handled,
     // so a reconcile re-feed of the same event can never double-run it.
     expect(await sessions.hasTriggerSession("acme", "sentinel", "ev-9")).toBe(true);
@@ -826,7 +841,9 @@ describe("activateDirect — the T-d reaction step entry", () => {
     await instance.idle();
     expect(started).toMatchObject({ started: true });
     const sessionId = "sessionId" in started ? started.sessionId : "";
-    for (const m of mailbox.drain("acme", sessionId)) if (typeof m.content === "string") seen.push(m.content);
+    const delivered = await mailbox.drain("acme", sessionId);
+    if (delivered.kind !== "read") throw new Error(`the steering log must be readable here, got ${delivered.kind}`);
+    for (const m of delivered.value) if (typeof m.content === "string") seen.push(m.content);
     expect(seen.some((c) => c.includes("[reaction step] Re-run the smoke scorecard"))).toBe(true);
   });
 });

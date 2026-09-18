@@ -1,5 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
-import type { ChatMessage, PermissionDecision, PermissionHook } from "@everdict/agent-runtime";
+import type { PermissionDecision, PermissionHook } from "@everdict/agent-runtime";
 import type { AgentRegistry, SubscriptionStore, TenantKeyStore } from "@everdict/application-control";
 import type { AgentSessionRecord, HandoffCheckpoint } from "@everdict/contracts";
 import {
@@ -16,7 +16,7 @@ import { z } from "zod";
 import { isGuardedAction } from "./action-policy.js";
 import { AgentActivator, type TurnOutcome } from "./agent-activation.js";
 import { type AgentDraft, AgentDraftSchema } from "./agent-draft-tool.js";
-import { AgentMailbox } from "./agent-mailbox.js";
+import { AgentMailbox, type MailboxReceipt, mailboxDrainInput } from "./agent-mailbox.js";
 import type { AgentTryEvent } from "./agent-try.js";
 import { runAgentTry } from "./agent-try.js";
 import { withChatTurnRun } from "./chat-run.js";
@@ -200,7 +200,9 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
   const permissions = new PermissionRegistry();
   // The message substrate (agent-teams.md S1): a per-session mailbox the streaming turn drains at each turn boundary.
   // POST /input delivers a user steering message; POST /event delivers a platform event (both absorbed mid-run).
-  const mailbox = new AgentMailbox();
+  // Backed by the session store's steering log (DEFAUL-37) — the same row that makes the roster survive a restart
+  // now carries what the roster was TOLD, so the two halves of a teammate come back together.
+  const mailbox = new AgentMailbox(deps.sessions, deps.now);
   // Fine-grained "always allow / deny this tool" rules (per session) that short-circuit the HITL prompt.
   const rules = new PermissionRules();
   // Standing-rule durability (LESSON 059 P4): the in-memory map is the hot path; the session record is the
@@ -255,9 +257,17 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     if (t) await runTeammateTurn(deps, deps.authenticate, mailbox, sessionId, t.token, undefined, undefined, true);
   });
   // Deliver to a session's mailbox and, if it is a teammate, wake it to process the message (no-op for plain sessions).
-  const deliver = (workspace: string, sessionId: string, envelope: Parameters<AgentMailbox["enqueue"]>[2]): void => {
-    mailbox.enqueue(workspace, sessionId, envelope);
+  // The append is AWAITED before the wake and before any caller answers "queued": a wake that overtook its own
+  // message would find an empty log, and a 202 that overtook it would promise a delivery this process cannot make
+  // across its own restart (protocol L1 — authority before effect).
+  const deliver = async (
+    workspace: string,
+    sessionId: string,
+    envelope: Parameters<AgentMailbox["enqueue"]>[2],
+  ): Promise<MailboxReceipt> => {
+    const receipt = await mailbox.enqueue(workspace, sessionId, envelope);
     if (supervisor.isTeammate(sessionId)) supervisor.wake(sessionId);
+    return receipt;
   };
   // Spawn a persistent teammate for a principal: mint its execution token (acts AS the creator), create its session,
   // register it with the supervisor, seed the standing task, and wake it. Shared by POST /teammates AND the
@@ -302,7 +312,7 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
       watch: new Set(watch),
     });
     supervisor.register(sessionId, name);
-    deliver(principal.workspace, sessionId, {
+    await deliver(principal.workspace, sessionId, {
       from: "user",
       content: `You are "${name}", an autonomous teammate. Your standing task:\n${task}`,
     });
@@ -312,8 +322,17 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
   // durable half is the session rows; the volatile half (the execution token) is re-minted here and the stale
   // key revoked, so a restart changes nothing a teammate's owner can observe. Registered quietly: no wake, no
   // re-seeded standing task (the transcript already carries it) — the next message or watched event wakes it.
-  const restoreTeammates = async (): Promise<number> => {
-    if (!deps.keyStore) return 0;
+  //
+  // ── EXCEPT WHERE A MESSAGE ALREADY ARRIVED (DEFAUL-37) ────────────────────────────────────────────
+  //
+  // "The next message wakes it" was the whole answer for as long as the channel was a Map, because there was
+  // nothing else that could be waiting. Now a restored teammate may come back with instructions the previous
+  // process took and never delivered, and those ARE the next message — they just arrived before the restart.
+  // A durable log nobody reads on boot is a table, so the restore wakes exactly the teammates whose log is
+  // non-empty. It re-sends nothing: the rows are the previous process's, still `queued`, and the woken turn
+  // claims them in seq order.
+  const restoreTeammates = async (): Promise<{ restored: number; woken: number }> => {
+    if (!deps.keyStore) return { restored: 0, woken: 0 };
     const keyStore = deps.keyStore;
     const rows = await deps.sessions.listTeammateSessions();
     let restored = 0;
@@ -348,20 +367,41 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
         );
       }
     }
-    return restored;
+    // ⚠️ An unreadable steering log is NOT "nobody is waiting" (protocol L2). The teammates are restored either
+    // way — what is lost is the immediacy, not the message: the rows stay `queued` and the next delivery's wake
+    // drains them along with the new one. So the case is NAMED here, loudly, rather than collapsed into `woken: 0`.
+    let queued: { tenant: string; sessionId: string; queued: number }[];
+    try {
+      queued = await mailbox.queuedSessions();
+    } catch (err) {
+      console.error(
+        `[agent] the steering log could not be read at boot, so ${restored} restored teammate(s) were NOT woken for ` +
+          `instructions that may be waiting: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return { restored, woken: 0 };
+    }
+    let woken = 0;
+    for (const row of queued) {
+      if (!teammates.has(row.sessionId)) continue; // a plain conversation drains its own log on its next turn
+      supervisor.wake(row.sessionId);
+      woken += 1;
+    }
+    return { restored, woken };
   };
-  // Fan a platform event out to a (workspace, owner)'s teammates that watch its kind, waking each. Returns the count.
-  const fanEvent = (
+  // Fan a platform event out to a (workspace, owner)'s teammates that watch its kind, waking each. Returns the
+  // count — of teammates the log actually TOOK the event for, not of teammates we aimed at: `notified` is the
+  // caller's evidence, and counting an append that has not returned would report a delivery nobody can find.
+  const fanEvent = async (
     workspace: string,
     owner: string,
     kind: string,
     source: string | undefined,
     message: string,
-  ): number => {
+  ): Promise<number> => {
     let notified = 0;
     for (const [sessionId, t] of teammates) {
       if (t.workspace !== workspace || t.owner !== owner || !t.watch.has(kind)) continue;
-      deliver(workspace, sessionId, { from: "event", sender: source ?? kind, content: message });
+      await deliver(workspace, sessionId, { from: "event", sender: source ?? kind, content: message });
       notified += 1;
     }
     return notified;
@@ -668,13 +708,15 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     if (controller === null)
       return reply.code(409).send({ code: "CONFLICT", message: "A turn is already running for this conversation." });
 
-    const drainInput = (): ChatMessage[] => mailbox.drain(principal.workspace, id);
+    // An unreadable steering log ABORTS this turn rather than reading as "nobody said anything": the queued rows
+    // stay queued, and the next turn (or the boot wake) delivers them. See mailboxDrainInput.
+    const drainInput = mailboxDrainInput(mailbox, principal.workspace, id, () => controller.abort());
     // Route send_message to another of the caller's conversations (S2 generalization): delivered to that session's
     // mailbox (agent-attributed), absorbed on its next turn. Owner-scoped — an agent only messages its owner's sessions.
     const sendMessage = async (to: string, message: string): Promise<{ ok: boolean; error?: string }> => {
       const target = await deps.sessions.getSession(principal.workspace, principal.subject, to);
       if (!target) return { ok: false, error: `No conversation "${to}" you own to message.` };
-      deliver(principal.workspace, to, { from: "agent", sender: id, content: message });
+      await deliver(principal.workspace, to, { from: "agent", sender: id, content: message });
       return { ok: true };
     };
     // spawn_teammate for this run — an agent can spin up an autonomous teammate (owned by the same principal).
@@ -1015,10 +1057,18 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     // boundary — a stop that lands first means that boundary never comes. Drop what is still queued and hand the
     // member's own messages back: undrained, they would silently prepend themselves to some LATER turn, and
     // dropped silently they would exist nowhere at all. The caller puts them back in the composer.
-    const dropped = mailbox
-      .clear(principal.workspace, id)
-      .filter((envelope) => envelope.from === "user")
-      .map((envelope) => envelope.content);
+    const cleared = await mailbox.clear(principal.workspace, id);
+    // A steering log we could not read is not a log with nothing in it. Saying `dropped: []` here would tell the
+    // member their words were absorbed by the turn they just stopped, while the rows sit queued for the NEXT one
+    // — the exact reappearance this clear exists to prevent. The stop still happened; what we cannot say is what
+    // it took with it.
+    if (cleared.kind !== "read")
+      return reply.code(503).send({
+        code: "UPSTREAM_UNAVAILABLE",
+        message:
+          "The turn was stopped, but the steering log could not be read — your queued messages are still queued.",
+      });
+    const dropped = cleared.value.filter((envelope) => envelope.from === "user").map((envelope) => envelope.content);
     return reply.send({ ok: true, dropped });
   });
 
@@ -1039,8 +1089,11 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     // to a normal send.
     if (!liveTurns.hasInterrupt(principal.workspace, id))
       return reply.code(404).send({ code: "NOT_FOUND", message: "No interruptible turn for that conversation." });
+    // The message is durable BEFORE the turn is interrupted. Interrupting first would park the loop at a boundary
+    // whose drain has already run, so a redirect that lost the race would read as a bare interrupt ("stop and wait")
+    // — and the member's words would land in some later turn instead.
     if (parsed.data.message !== undefined)
-      deliver(principal.workspace, id, { from: "user", content: parsed.data.message });
+      await deliver(principal.workspace, id, { from: "user", content: parsed.data.message });
     liveTurns.interrupt(principal.workspace, id);
     return reply.send({ ok: true });
   });
@@ -1072,8 +1125,10 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     const session = await deps.sessions.getSession(principal.workspace, principal.subject, id);
     if (!session) return reply.code(404).send({ code: "NOT_FOUND", message: "Conversation not found." });
-    deliver(principal.workspace, id, { from: "user", content: parsed.data.message });
-    return reply.code(202).send({ queued: true });
+    const receipt = await deliver(principal.workspace, id, { from: "user", content: parsed.data.message });
+    // The seq IS the ordering token: a caller that holds it before sending the next instruction has "this one
+    // first" as a fact about the log rather than a hope about two in-flight requests.
+    return reply.code(202).send({ queued: true, seq: receipt.seq });
   });
 
   // Deliver a platform EVENT into a conversation's mailbox (agent-teams.md S1 — the seed of message-based monitoring).
@@ -1087,12 +1142,12 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     const session = await deps.sessions.getSession(principal.workspace, principal.subject, id);
     if (!session) return reply.code(404).send({ code: "NOT_FOUND", message: "Conversation not found." });
-    deliver(principal.workspace, id, {
+    const receipt = await deliver(principal.workspace, id, {
       from: "event",
       ...(parsed.data.source !== undefined ? { sender: parsed.data.source } : {}),
       content: parsed.data.message,
     });
-    return reply.code(202).send({ queued: true });
+    return reply.code(202).send({ queued: true, seq: receipt.seq });
   });
 
   // S3 — spawn a persistent TEAMMATE: a long-lived agent (its own session) that runs autonomously, reacting to
@@ -1234,7 +1289,7 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
       const { workspace, recipient, kind, source, message, payload } = parsed.data;
       const notified =
         recipient !== undefined
-          ? fanEvent(workspace, recipient, kind, source, taskFanContent(kind, message, payload))
+          ? await fanEvent(workspace, recipient, kind, source, taskFanContent(kind, message, payload))
           : 0;
       const activated = activator ? await activator.onEvent({ workspace, ...eventOf(parsed.data) }) : 0;
       // Third consumer of the same fact: conversations that PARKED on it. Awaited like the activation so the caller's
@@ -1254,7 +1309,7 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     if (!principal) return reply;
     const parsed = eventFieldsSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
-    const notified = fanEvent(
+    const notified = await fanEvent(
       principal.workspace,
       principal.subject,
       parsed.data.kind,

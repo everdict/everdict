@@ -334,13 +334,20 @@ async function main(): Promise<void> {
 
   // Teammate roster restore (P2/LESSON 059): the roster's durable half is the session rows — re-register every
   // standing teammate (fresh token minted, stale key revoked) so a restart no longer evaporates the team.
-  const teammateRestorer = (app as unknown as { teammateRestorer?: { restore: () => Promise<number> } })
-    .teammateRestorer;
+  const teammateRestorer = (
+    app as unknown as { teammateRestorer?: { restore: () => Promise<{ restored: number; woken: number }> } }
+  ).teammateRestorer;
   if (teammateRestorer) {
     void teammateRestorer
       .restore()
-      .then((restored) => {
+      .then(({ restored, woken }) => {
         if (restored > 0) console.error(`▶ everdict-agent: restored ${restored} standing teammate(s) after restart`);
+        // The half that makes the durable channel visible in the logs: a teammate woken here is one that was
+        // told something the previous process never delivered (DEFAUL-37).
+        if (woken > 0)
+          console.error(
+            `▶ everdict-agent: woke ${woken} teammate(s) holding steering messages from before the restart`,
+          );
       })
       .catch((err: unknown) => {
         console.error(`[agent] teammate restore failed: ${err instanceof Error ? err.message : String(err)}`);

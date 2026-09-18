@@ -1,5 +1,6 @@
 import type { AgentRegistry, TenantKeyStore } from "@everdict/application-control";
 import type { AgentMessageRecord, AgentSessionRecord, AgentSpec } from "@everdict/contracts";
+import { InMemoryAgentSessionStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { type ActivationEvent, AgentActivator } from "./agent-activation.js";
 import { AgentMailbox } from "./agent-mailbox.js";
@@ -59,6 +60,7 @@ const keyStore = {
 } as unknown as TenantKeyStore;
 
 function sessionsStub() {
+  const inbox = new InMemoryAgentSessionStore();
   const created: AgentSessionRecord[] = [];
   const statuses: Array<{ id: string; status: string }> = [];
   const messages: AgentMessageRecord[] = [];
@@ -122,6 +124,16 @@ function sessionsStub() {
     async listMessages() {
       return messages;
     },
+    // ── THE STEERING LOG IS THE REAL TWIN, NOT A STUB ────────────────────────────────────────────────
+    //
+    // A hand-rolled `async claimInbox() { return []; }` would make every assertion about a seeded activation
+    // green over a channel that delivered nothing — the always-empty sibling of the always-succeeds double
+    // (rule `testing`). Delegating to `InMemoryAgentSessionStore` is cheap and makes the same decision
+    // production makes, including the tenant scoping and the one-shot claim.
+    appendInbox: inbox.appendInbox.bind(inbox),
+    claimInbox: inbox.claimInbox.bind(inbox),
+    discardInbox: inbox.discardInbox.bind(inbox),
+    listQueuedInboxSessions: inbox.listQueuedInboxSessions.bind(inbox),
   };
 }
 
@@ -132,7 +144,7 @@ function activator(opts: { publishCheckpoint?: () => Promise<void> }) {
     registry,
     keyStore,
     sessions,
-    mailbox: new AgentMailbox(),
+    mailbox: new AgentMailbox(new InMemoryAgentSessionStore(), () => new Date().toISOString()),
     runTurn: async () => ({ stopReason: "budget_exhausted" }),
     reportRunEvent: async (input) => {
       reports.push({ kind: input.kind, ...(input.message ? { message: input.message } : {}) });

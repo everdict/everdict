@@ -3764,6 +3764,31 @@ const MUTATIONS = [
     to: "        void after;\n        void limit;\n        const trajectory = await deps.service.trajectory(principal.workspace, req.params.id, principal.subject);\n        void ({",
     suite: ["--root", "apps/api", "src/api/run/run-trajectory-paging.counterexample.test.ts"],
   },
+  {
+    // ── THE STEERING CHANNEL IS DURABLE (DEFAUL-37) ─────────────────────────────────────────────────
+    //
+    // The orchestrator↔worker channel was a `Map` in the agent service, while the ROSTER's durable half was a
+    // session row re-registered on boot — so a restart brought the worker back and dropped what it had been
+    // told. Writing the envelope to a per-instance map instead of the store is that defect verbatim, and the
+    // counterexample reads it as "the message is gone".
+    name: "DEFAUL-37 — the steering message lives in this process",
+    file: "apps/agent/src/agent-mailbox.ts",
+    from: "    const stored = await this.store.appendInbox(",
+    to: "    if (workspace !== \"\") return { seq: 1, at: this.now() };\n    const stored = await this.store.appendInbox(",
+    build: "@everdict/agent",
+    suite: ["--root", "apps/agent", "src/agent-mailbox.test.ts"],
+  },
+  {
+    // The other half of the same law: an unreadable log must not read as an empty one. Answering `read` with
+    // an empty value is the `.catch(() => [])` this whole change exists to keep out (protocol L2) — the turn
+    // would then proceed as though nobody had said anything, while the instruction sat readable in a table.
+    name: "DEFAUL-37 — an unreadable steering log reads as silence",
+    file: "apps/agent/src/agent-mailbox.ts",
+    from: "    if (read.kind !== \"read\") return read;\n    return { kind: \"read\", value: read.value.map((entry) => renderEnvelope(toEnvelope(entry))) };",
+    to: "    if (read.kind !== \"read\") return { kind: \"read\", value: [] };\n    return { kind: \"read\", value: read.value.map((entry) => renderEnvelope(toEnvelope(entry))) };",
+    build: "@everdict/agent",
+    suite: ["--root", "apps/agent", "src/agent-mailbox.test.ts"],
+  },
 ];
 
 // ── ONE RUNG AT A TIME, FOR RE-AIMING (arch-review 65) ──────────────────────────────────────────────

@@ -456,8 +456,15 @@ export class AgentActivator {
     // O2 baseline: the session carries the interrupted run's history — this run's trajectory starts after it.
     const baseSeq = await this.lastSeq(workspace, sessionId);
     try {
+      // AWAITED, and in order: the seeds ARE this resumed turn's prompt, so a turn that started before the log
+      // took them would wake up to a mailbox that is still filling — and the seq the store assigns is what makes
+      // "this seed, then that one" a fact rather than a scheduling accident.
       for (const seed of opts.seeds) {
-        this.deps.mailbox.enqueue(workspace, sessionId, { from: "event", sender: seed.sender, content: seed.content });
+        await this.deps.mailbox.enqueue(workspace, sessionId, {
+          from: "event",
+          sender: seed.sender,
+          content: seed.content,
+        });
       }
       const base = this.buildPermit(event, agentId, sessionId, spec, controller.signal, runRef);
       const permit = opts.wrapPermit ? opts.wrapPermit(base) : base;
@@ -669,7 +676,7 @@ export class AgentActivator {
     const controller = new AbortController();
     this.controllers.set(sessionId, { workspace: event.workspace, abort: controller });
     try {
-      this.deps.mailbox.enqueue(event.workspace, sessionId, {
+      await this.deps.mailbox.enqueue(event.workspace, sessionId, {
         from: "event",
         sender: event.source ?? event.kind,
         content: renderActivationPrompt(spec, event),
@@ -677,7 +684,7 @@ export class AgentActivator {
       // A reaction step's standing instruction rides as a second mailbox message — the step tells this agent
       // what its link in the chain is FOR, on top of the fact itself.
       if (opts?.instruction !== undefined) {
-        this.deps.mailbox.enqueue(event.workspace, sessionId, {
+        await this.deps.mailbox.enqueue(event.workspace, sessionId, {
           from: "event",
           sender: "reaction",
           content: `[reaction step] ${opts.instruction}`,
