@@ -189,8 +189,12 @@ instruction immediately. Every turn has held an `AbortController` since the lane
 only caller, so the one way to stop a delegate going the wrong way was `close_sandbox` — which destroyed the
 container and every uncommitted change in it.
 
-**Its state.** `DelegateState` is a union of seven: `pending_init` · `running` · `interrupted` ·
-`completed{report?}` · `errored` · `closed` · `orphaned`. `completed` is deliberately not `closed` — a
+**Its state.** `DelegateState` is a union of eight: `pending_init` · `running` · `interrupted` ·
+`completed{report?}` · `awaiting{report}` · `errored` · `closed` · `orphaned`. ⚠️ `awaiting` is a delegate
+that STOPPED ON A QUESTION — it hit a decision it must not make alone and its report says which. The
+distinction only shows at scale and is the whole reason it exists: a supervisor watching twenty delegates
+must not open twenty reports to find the three waiting on it, and "done" and "stuck on you" are opposite
+calls to action. The answer goes back as the delegate's next task. `completed` is deliberately not `closed` — a
 finished delegate stays addressable until the supervisor lets it go, and that gap IS the review seam.
 `orphaned` is the third value (rule `protocol` L2): the ledger has the session, this control plane does not
 hold it, and that is neither an ending nor an absence.

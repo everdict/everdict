@@ -46,10 +46,12 @@ export function planDelivery(state: DelegateState, mode: DelegateDeliveryMode): 
       );
     case "pending_init":
     case "completed":
+    case "awaiting":
     case "interrupted":
-      // Idle in three different ways, and identical for the purpose of delivery. A `completed` delegate
-      // taking a follow-up is the point of keeping `completed` apart from `closed`: "that is nearly right,
-      // now do this" must not require a new container and a fresh clone.
+      // Idle in four different ways, and identical for the purpose of delivery. A `completed` delegate taking
+      // a follow-up is the point of keeping `completed` apart from `closed`: "that is nearly right, now do
+      // this" must not require a new container and a fresh clone. An `awaiting` one is how the ANSWER gets
+      // back — the delegate asked, and a `task` carrying the answer is the reply.
       return mode === "message" ? { kind: "queue", startsTurn: false } : { kind: "start" };
     case "running":
       switch (mode) {
@@ -71,6 +73,7 @@ export function interruptedFrom(state: DelegateState): Extract<DelegateState, { 
     case "running":
       return "running";
     case "completed":
+    case "awaiting":
       return "completed";
     case "pending_init":
       return "pending_init";

@@ -1504,16 +1504,29 @@ export class SandboxSessionService {
       // Overwriting it with `completed` here would report a finish for a turn somebody stopped.
       if (playground.state.status !== "interrupted") {
         const report = await this.readDelegateReport(live, playground);
+        // ⚠️ A REPORT WITH QUESTIONS IS NOT A FINISHED DELEGATE. It stopped on a decision it must not make
+        // alone, and only an answer moves it. Distinguished here rather than left for a reader to notice,
+        // because at scale "done" and "stuck on you" are opposite calls to action and look identical until
+        // something separates them — a supervisor watching twenty delegates must not open twenty reports.
         playground.state =
-          status === "succeeded"
-            ? { status: "completed", at: this.now(), ...(report ? { report } : {}) }
-            : { status: "errored", at: this.now(), message: `the turn settled ${status}` };
+          status !== "succeeded"
+            ? { status: "errored", at: this.now(), message: `the turn settled ${status}` }
+            : report !== undefined && report.questions.length > 0
+              ? { status: "awaiting", at: this.now(), report }
+              : { status: "completed", at: this.now(), ...(report ? { report } : {}) };
         if (report)
           live.trace.push({
             t: live.t++,
             kind: "env_action",
             action: "delegate.reported",
-            detail: { run: id, answers: report.answers.length, blockers: report.blockers.length },
+            detail: {
+              run: id,
+              answers: report.answers.length,
+              blockers: report.blockers.length,
+              // The questions travel on the ledger, not only in the live state: a supervisor reading back
+              // afterwards needs to know the delegate stopped ASKING rather than stopped finishing.
+              questions: report.questions.map((q) => q.id),
+            },
           });
       }
     })()

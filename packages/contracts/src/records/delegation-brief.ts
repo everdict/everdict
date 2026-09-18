@@ -78,5 +78,32 @@ export const DelegateReportSchema = z.object({
   // What it could not get past, in its own words. Separate from a `not_met` reason because a blocker can stop
   // a delegate before it has an opinion about any criterion at all.
   blockers: z.array(z.string().max(1000)).max(20).default([]),
+  // ── WHAT IT NEEDS FROM YOU ───────────────────────────────────────────────────────────────────────
+  //
+  // A delegate that hits a decision it must not make alone — where a new screen lives, which of two readings
+  // of the issue is right — has exactly one way to raise it: end its turn and say so. That is the channel we
+  // have (a delegate cannot knock mid-turn; see the session lane's own note on why).
+  //
+  // ⚠️ THE POINT IS NOT THE FIELD, IT IS THE STATE IT PRODUCES. A report carrying questions settles the
+  // delegate `awaiting` rather than `completed`, because a supervisor watching twenty delegates must not have
+  // to open twenty reports to find the three that are waiting on an answer. "Done" and "stuck on you" look
+  // identical until something makes them different, and what a supervisor does about them is opposite.
+  //
+  // `options` is borrowed from codex's `request_user_input`: a question with candidate answers is far cheaper
+  // to answer than an open one, and a delegate that has narrowed it to two is telling the supervisor that the
+  // narrowing is already done.
+  questions: z
+    .array(
+      z.object({
+        id: z.string().min(1).max(100),
+        question: z.string().min(1).max(2000),
+        // Why it cannot answer this itself. Required, because "I need a decision" without the reason sends
+        // the supervisor back into the work to reconstruct what the delegate already knew.
+        why: z.string().min(1).max(1000),
+        options: z.array(z.string().max(500)).max(8).default([]),
+      }),
+    )
+    .max(20)
+    .default([]),
 });
 export type DelegateReport = z.infer<typeof DelegateReportSchema>;

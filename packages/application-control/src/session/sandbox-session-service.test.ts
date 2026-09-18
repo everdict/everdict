@@ -170,6 +170,9 @@ function fakeDriver(
     failWrite?: boolean; // writeFile throws — the delegation context-seed failure path
     emptyStdout?: boolean; // every command answers with empty output (a directory with no remote, say)
     snapshot?: (id: string, ref: string, auth?: RegistryAuth) => void;
+    // What `cat …/REPORT.json` answers. The delegate's report comes back as a FILE in its working directory
+    // (it has no channel to the control plane), so the double answers that read the way a container would.
+    report?: unknown;
   } = {},
 ) {
   const provisioned: ComputeSpec[] = [];
@@ -203,6 +206,10 @@ function fakeDriver(
           execs.push(command);
           execEnvs.push(execOpts?.env);
           if (command.includes("boom")) return { stdout: "", stderr: "kaboom", exitCode: 1 };
+          if (command.includes("REPORT.json"))
+            return opts.report !== undefined
+              ? { stdout: JSON.stringify(opts.report), stderr: "", exitCode: 0 }
+              : { stdout: "", stderr: "", exitCode: 1 };
           return opts.emptyStdout
             ? { stdout: "", stderr: "", exitCode: 0 }
             : { stdout: `ran:${command}`, stderr: "", exitCode: 0 };
@@ -224,10 +231,10 @@ function fakeDriver(
   return { driver, provisioned, disposed, reaped, execs, execEnvs, written };
 }
 
-function build(over: Partial<SandboxSessionServiceDeps> = {}) {
+function build(over: Partial<SandboxSessionServiceDeps> = {}, driverOpts: Parameters<typeof fakeDriver>[0] = {}) {
   const runStore = fakeRunStore();
   const trajectories = fakeTrajectories();
-  const driver = fakeDriver();
+  const driver = fakeDriver(driverOpts);
   let n = 0;
   let nowIso = "2026-07-30T00:00:00.000Z";
   const service = new SandboxSessionService({
@@ -486,9 +493,13 @@ import type { EvaluableHarness } from "@everdict/contracts";
 import type { BudgetTracker, UsageMeter } from "@everdict/domain";
 import type { ResolvedSessionHarness } from "./sandbox-session-service.js";
 
-async function until(cond: () => boolean, ms = 2000): Promise<void> {
+// ⚠️ THE PREDICATE MAY BE ASYNC, and taking only a sync one was a trap that silently disarmed the wait: an
+// `async () => …` arrow returns a PROMISE, every promise is truthy, so `!cond()` was false on the first check
+// and this returned immediately. A test that waited for nothing then asserted against a state that had not
+// happened yet — and failed with a confusing mismatch rather than a timeout, which is the tell.
+async function until(cond: () => boolean | Promise<boolean>, ms = 2000): Promise<void> {
   const start = Date.now();
-  while (!cond()) {
+  while (!(await cond())) {
     if (Date.now() - start > ms) throw new Error("condition not reached in time");
     await new Promise((r) => setTimeout(r, 5));
   }
@@ -2336,6 +2347,47 @@ describe("SandboxSessionService — delegation profiles (a registered environmen
     await expect(
       service.create({ tenant: "acme", createdBy: "alice", profile: { id: "fixer" }, issueId: "NOPE-1" }),
     ).rejects.toMatchObject({ status: 404 });
+  });
+
+  // ── A DELEGATE THAT STOPPED ON A QUESTION IS NOT A DELEGATE THAT FINISHED ───────────────────────
+  //
+  // ⚠️ THE POINT ONLY SHOWS AT SCALE. One delegate's report can be opened and read. Twenty cannot — and the
+  // three waiting on an answer need the opposite action from the seventeen that are done. Until this existed
+  // the two rendered identically, so a supervisor's only way to find the blocked ones was to read every
+  // report it had.
+  const reportWith = (questions: unknown[]) => ({
+    summary: "did the part I could",
+    answers: [],
+    changes: [],
+    gateRuns: [],
+    blockers: [],
+    questions,
+  });
+
+  it("settles `awaiting` when the report carries questions, not `completed`", async () => {
+    const fake = fakeDelegationProfile();
+    const { service } = build(
+      { resolveDelegationProfile: async () => fake.resolved },
+      { report: reportWith([{ id: "q1", question: "which?", why: "not mine to pick", options: ["a", "b"] }]) },
+    );
+    const rec = await service.create({ tenant: "acme", createdBy: "alice", profile: { id: "fixer" } });
+    const outcome = await service.submitTask(creator, rec.id, { task: "do it" });
+    if (outcome.delivered !== "started") throw new Error("expected a turn");
+    await until(async () => (await service.getSession(creator, rec.id)).live?.delegate?.status === "awaiting");
+
+    const state = (await service.getSession(creator, rec.id)).live?.delegate;
+    expect(state?.status === "awaiting" && state.report.questions[0]?.id).toBe("q1");
+    await service.close(creator, rec.id);
+  });
+
+  it("settles `completed` when the report asks nothing", async () => {
+    const fake = fakeDelegationProfile();
+    const { service } = build({ resolveDelegationProfile: async () => fake.resolved }, { report: reportWith([]) });
+    const rec = await service.create({ tenant: "acme", createdBy: "alice", profile: { id: "fixer" } });
+    const outcome = await service.submitTask(creator, rec.id, { task: "do it" });
+    if (outcome.delivered !== "started") throw new Error("expected a turn");
+    await until(async () => (await service.getSession(creator, rec.id)).live?.delegate?.status === "completed");
+    await service.close(creator, rec.id);
   });
 
   it("a campaign delegate receives a platform view and scoped credential, never a caller brief", async () => {

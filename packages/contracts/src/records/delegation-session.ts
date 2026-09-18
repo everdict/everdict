@@ -54,6 +54,11 @@ export const DelegateStateSchema = z.discriminatedUnion("status", [
   // Done, and waiting to be reviewed. The report is optional because a delegate can end a turn without
   // filing one — and a supervisor must be able to tell "finished without reporting" from "still running".
   z.object({ status: z.literal("completed"), at: z.string(), report: DelegateReportSchema.optional() }),
+  // ⚠️ STOPPED ON A QUESTION, NOT FINISHED. The delegate ended its turn because it hit a decision it must not
+  // make alone, and its report says which. Distinct from `completed` for one reason that only shows at scale:
+  // a supervisor watching twenty delegates must not open twenty reports to find the three waiting on it.
+  // "Done" and "stuck on you" are opposite calls to action and looked identical until this existed.
+  z.object({ status: z.literal("awaiting"), at: z.string(), report: DelegateReportSchema }),
   z.object({ status: z.literal("errored"), at: z.string(), message: z.string().min(1).max(4000) }),
   z.object({ status: z.literal("closed"), at: z.string() }),
   // ⚠️ THE THIRD VALUE. The ledger has this session; this control plane does not hold it. A restart is the
@@ -76,6 +81,7 @@ export function delegateIsReachable(state: DelegateState): boolean {
     case "running":
     case "interrupted":
     case "completed":
+    case "awaiting":
       return true;
     case "errored":
     case "closed":
@@ -94,9 +100,16 @@ export function delegateIsSettled(state: DelegateState): boolean {
       return false;
     case "interrupted":
     case "completed":
+    case "awaiting":
     case "errored":
     case "closed":
     case "orphaned":
       return true;
   }
+}
+
+// A delegate is WAITING ON THE SUPERVISOR when only an answer will move it. The one predicate a fan-out view
+// needs: with many delegates in flight, this is the filter that turns a wall of sessions into a worklist.
+export function delegateAwaitsAnswer(state: DelegateState): boolean {
+  return state.status === "awaiting";
 }
