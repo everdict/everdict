@@ -15,11 +15,14 @@ export function registerMetaTools(server: McpServer): void {
       annotations: { readOnlyHint: true },
       description:
         "What THIS control plane is built from — the commit of the image serving you, and when the process " +
-        "started. ⚠️ RUN IT BEFORE YOU TRUST ANY TOOL'S SCHEMA when you have a checkout in front of you: if " +
-        "`commit` is not a commit your checkout contains, the contracts you are being handed are OLDER than " +
-        "your code. A defect you just fixed can still be live, and a tool you expect may be absent — say the " +
-        "deployment is behind rather than re-opening the finding. `commit: null` means the image carries no " +
-        "stamp at all, which is neither agreement nor staleness: it is 'I do not know what I am built from'.",
+        "started. ⚠️ RUN IT BEFORE YOU TRUST ANY TOOL'S SCHEMA when you have a checkout in front of you. " +
+        "⚠️ COMPARE IT THE RIGHT WAY: the dangerous case is a deployment BEHIND you, and a commit behind yours " +
+        'is an ANCESTOR of your HEAD — so "is this a commit I have?" answers *yes* for exactly the case that ' +
+        "bites. The test is `git merge-base --is-ancestor <commit> HEAD` succeeding while `<commit>` is not " +
+        "HEAD: that is BEHIND, and it means a defect you just fixed can still be live and a tool you expect " +
+        "may be absent from this catalogue — say the deployment is behind rather than re-opening the finding. " +
+        "Not an ancestor at all = a different line than your checkout. `commit: null` = the image carries no " +
+        "stamp, which is neither agreement nor staleness: 'I do not know what I am built from'.",
       inputSchema: {},
     },
     async () => ok({ commit, startedAt }),
